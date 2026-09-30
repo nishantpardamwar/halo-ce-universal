@@ -395,3 +395,33 @@ int host_sdl_show_simple_message_box(uint32_t flags, const char *title, const ch
 {
 	return SDL_ShowSimpleMessageBox((SDL_MessageBoxFlags)flags, title, message, NULL) ? 1 : 0;
 }
+
+/* ---------- the device's vibration (the touch controls' feedback,
+port/linux/src/touch_sdl.c, and the rumble the game asks a controller for) */
+
+/* the first haptic device, opened when the first pulse is asked for; the
+device may not have one at all, and then nothing is played */
+static SDL_Haptic *host_haptic;
+
+int host_sdl_haptic_pulse(unsigned int strength, unsigned int milliseconds)
+{
+	if (!host_haptic)
+	{
+		SDL_HapticID *ids;
+		int count = 0;
+
+		ids = SDL_GetHaptics(&count);
+		if (ids)
+		{
+			if (count > 0)
+				host_haptic = SDL_OpenHaptic(ids[0]);
+			SDL_free(ids);
+		}
+		if (!host_haptic)
+			return 0;
+		host_logf(HOST_LOG_INFO, "haptics: %s", SDL_GetHapticName(host_haptic));
+	}
+	if (strength > 100)
+		strength = 100;
+	return SDL_PlayHapticRumble(host_haptic, strength / 100.0f, milliseconds) ? 1 : 0;
+}

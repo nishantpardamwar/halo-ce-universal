@@ -3,7 +3,9 @@
 `ninja linux` compiles the game with clang for 32-bit x86 Linux. The result
 is a native executable, `build/linux/halo`. The game shows its graphics with
 OpenGL 4.5. It plays sound through SDL3. It accepts keyboard, mouse and
-gamepad input.
+gamepad input. The Android build of the same platform layer
+([port/android](../android/README.md)) adds touch controls of its own
+(`src/touch_sdl.c`), which this README does not describe.
 
 The game is 32-bit code because its data (tags, cache files, saved games)
 contains 32-bit pointers, as on the Xbox.
@@ -414,7 +416,7 @@ person joins the game. If the game does not operate, Discord starts it.
 | Game code | All 466 C files of the game. The changes are in "Game source changes". |
 | Graphics | Direct3D 8 on OpenGL 4.5 core through SDL3 (`src/d3d8_gl.c`). The port translates the NV2A vertex shaders and register combiners to GLSL. It decodes all the Xbox texture formats. The vertex and index buffers come from a GL copy of the Xbox memory. |
 | Sound | Xbox DirectSound on SDL3 audio (`src/dsound_sdl.c`): PCM and Xbox ADPCM, mixed at 48 kHz, with volume, pitch, mix bins, distance, stereo pan, occlusion and obstruction. There is no Doppler effect, no cones and no reverb. |
-| Input | XInput on SDL3 (`src/xinput_sdl.c`): keyboard, mouse, gamepads with rumble, and the debug keyboard for the console. |
+| Input | XInput on SDL3 (`src/xinput_sdl.c`): keyboard, mouse, gamepads with rumble, and the debug keyboard for the console. On Android, the touch controls of the screen (`src/touch_sdl.c`). |
 | Files | The Win32 file functions and the MSVC file functions on POSIX, with the translation of Xbox paths. |
 | Threads | Threads, events, mutexes, critical sections, interlocked operations and alertable waits. |
 | Memory | The port reserves the Xbox memory at `0x80000000`. Thus the game gets the fixed addresses that it expects. |
@@ -492,7 +494,8 @@ Other changes:
 | --- | --- |
 | `scenario/scenario.c` | The BSP connection tables have names, not MSVC offsets. |
 | `rasterizer/xbox/rasterizer_xbox_environment_fog.c` | A local pointer gets its value from the file-scope array with the same name. |
-| `game/player_control.c` | The mouse aims the player on controller 1 directly. |
+| `game/player_control.c` | The mouse aims the player on controller 1 directly. On Android, it also tells the touch controls when a local player has a unit. |
+| `interface/ui_widget.c` | The mouse of the menus, as a pointer (`halo_ui_pointer.h`). On Android, a finger takes its place, and the same call tells the touch controls that a menu, and the game's on-screen keyboard, is up. |
 | `sound/game_sound.c` | The game calculates the obstruction of each sound one time for each tick, not for each frame. |
 | `cseries/errors.c` | `debug.txt` stays open between lines. |
 | `networking/`, `game/`, `interface/`, `bungie_net/network/` and the pools of objects, effects and sounds | The system link limits and the memory for them. |

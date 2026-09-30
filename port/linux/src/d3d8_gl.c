@@ -1129,49 +1129,106 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 
 /* ---------- the menus' pointer */
 
-#ifdef HALO_ANDROID
-int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
-{
-	(void)menus_active;
-	(void)pointer;
-	return 0;
-}
-#else
-/* a point in the window, as SDL reports it, in the menus' coordinates: the
-inverse of the letterboxed display blit at presentation, the screen's
-width and the menus' centering (halo_screen_ui_offset) */
-static void ui_point_from_window(float window_x, float window_y, short *x, short *y)
+/* the part of the window the game's picture fills, in the window's pixels:
+the letterbox the presentation blits into, the picture's own shape */
+static BOOL screen_picture_rect(int *left, int *top, int *width, int *height)
 {
 	struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
-	int window_width, window_height, pixel_width, pixel_height, width, height, left, top;
+	int pixel_width, pixel_height;
+
+	pixel_width = pixel_height = 0;
+	platform_video_drawable_size(&pixel_width, &pixel_height);
+	if (!back_buffer || pixel_width <= 0 || pixel_height <= 0 ||
+		back_buffer->target.gl_width <= 0 || back_buffer->target.gl_height <= 0)
+	{
+		return FALSE;
+	}
+	*width = pixel_width;
+	*height = (int)((long)pixel_width * back_buffer->target.gl_height / back_buffer->target.gl_width);
+	if (*height > pixel_height)
+	{
+		*height = pixel_height;
+		*width = (int)((long)pixel_height * back_buffer->target.gl_width / back_buffer->target.gl_height);
+	}
+	*left = (pixel_width - *width) / 2;
+	*top = (pixel_height - *height) / 2;
+	return TRUE;
+}
+
+/* a point in the picture's pixels, in the menus' coordinates: the screen's
+width and the menus' centering (halo_screen_ui_offset) */
+static void ui_point_from_pixels(float pixel_x, float pixel_y, short *x, short *y)
+{
+	struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
+	int left, top, width, height;
 	float screen_x, screen_y;
 
 	*x = *y = -1;
-	if (!back_buffer)
+	if (!back_buffer || !screen_picture_rect(&left, &top, &width, &height))
 		return;
-	platform_video_window_size(&window_width, &window_height);
-	platform_video_drawable_size(&pixel_width, &pixel_height);
-	if (window_width <= 0 || window_height <= 0)
-		return;
-	width = pixel_width;
-	height = (int)((long)pixel_width * back_buffer->target.gl_height / back_buffer->target.gl_width);
-	if (height > pixel_height)
-	{
-		height = pixel_height;
-		width = (int)((long)pixel_height * back_buffer->target.gl_width / back_buffer->target.gl_height);
-	}
-	left = (pixel_width - width) / 2;
-	top = (pixel_height - height) / 2;
-	screen_x = (window_x * pixel_width / window_width - left) * (float)back_buffer->target.width / (float)width;
-	screen_y = (window_y * pixel_height / window_height - top) * (float)back_buffer->target.height / (float)height;
+	screen_x = (pixel_x - left) * (float)back_buffer->target.width / (float)width;
+	screen_y = (pixel_y - top) * (float)back_buffer->target.height / (float)height;
 	*x = (short)floorf(screen_x - (float)(halo_screen_width() - 640) / 2.0f);
 	*y = (short)floorf(screen_y);
 }
 
-int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
+#ifdef HALO_ANDROID
+/* a finger's place, as a fraction of the window (touch_sdl.c): the window
+fills the display, so this is the same place in the window's pixels */
+static void ui_point_from_finger(float normalized_x, float normalized_y, short *x, short *y)
+{
+	int pixel_width, pixel_height;
+
+	pixel_width = pixel_height = 0;
+	platform_video_drawable_size(&pixel_width, &pixel_height);
+	if (pixel_width <= 0 || pixel_height <= 0)
+	{
+		*x = *y = -1;
+		return;
+	}
+	ui_point_from_pixels(normalized_x * pixel_width, normalized_y * pixel_height, x, y);
+}
+
+int halo_ui_pointer_update(int menus_active, int keyboard_active, struct halo_ui_pointer *pointer)
 {
 	struct platform_ui_pointer state;
 
+	/* what the touch controls show follows the game (touch_sdl.c) */
+	platform_touch_menus(menus_active != 0, keyboard_active != 0);
+	platform_ui_pointer_set_active(menus_active != 0);
+	if (!menus_active || !device.gl_ready || !platform_ui_pointer_read(&state))
+		return 0;
+	memset(pointer, 0, sizeof(*pointer));
+	ui_point_from_finger(state.nx, state.ny, &pointer->x, &pointer->y);
+	ui_point_from_finger(state.click_nx, state.click_ny, &pointer->click_x, &pointer->click_y);
+	pointer->moved = state.moved != FALSE;
+	pointer->left_clicks = (unsigned char)(state.left_clicks < 255 ? state.left_clicks : 255);
+	pointer->right_clicks = (unsigned char)(state.right_clicks < 255 ? state.right_clicks : 255);
+	return 1;
+}
+#else
+/* a point in the window, as SDL reports it, in the menus' coordinates */
+static void ui_point_from_window(float window_x, float window_y, short *x, short *y)
+{
+	int window_width, window_height, pixel_width, pixel_height;
+	float x_pixels, y_pixels;
+
+	*x = *y = -1;
+	platform_video_window_size(&window_width, &window_height);
+	pixel_width = pixel_height = 0;
+	platform_video_drawable_size(&pixel_width, &pixel_height);
+	if (window_width <= 0 || window_height <= 0 || pixel_width <= 0 || pixel_height <= 0)
+		return;
+	x_pixels = window_x * pixel_width / window_width;
+	y_pixels = window_y * pixel_height / window_height;
+	ui_point_from_pixels(x_pixels, y_pixels, x, y);
+}
+
+int halo_ui_pointer_update(int menus_active, int keyboard_active, struct halo_ui_pointer *pointer)
+{
+	struct platform_ui_pointer state;
+
+	(void)keyboard_active;
 	platform_ui_pointer_set_active(menus_active != 0);
 	if (!menus_active || !device.gl_ready || !platform_ui_pointer_read(&state))
 		return 0;
@@ -3626,15 +3683,12 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 
 		platform_video_drawable_size(&window_width, &window_height);
 		/* letterbox to the back buffer's aspect ratio */
-		width = window_width;
-		height = (int)((long)window_width * back_buffer->target.gl_height / back_buffer->target.gl_width);
-		if (height > window_height)
+		if (!screen_picture_rect(&x, &y, &width, &height))
 		{
+			x = y = 0;
+			width = window_width;
 			height = window_height;
-			width = (int)((long)window_height * back_buffer->target.gl_width / back_buffer->target.gl_height);
 		}
-		x = (window_width - width) / 2;
-		y = (window_height - height) / 2;
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 		glDisable(GL_SCISSOR_TEST);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -3644,6 +3698,18 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		/* row 0 of the render target is the top of the picture */
 		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
 			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+#ifdef HALO_ANDROID
+		/* the touch controls, over the picture (port/linux/src/touch_sdl.c) */
+		{
+			struct platform_touch_rect rect;
+
+			rect.left = x;
+			rect.top = y;
+			rect.width = width;
+			rect.height = height;
+			platform_touch_draw(&rect);
+		}
+#endif
 		platform_video_swap();
 		xgpu_gl_state_invalidate();
 		xgpu_texture_cache_begin_frame();

@@ -30,11 +30,9 @@ static struct platform_input_state input_state;
 /* keys pressed since the last read, so a press and release between two
 reads still counts as a press (input injected on Android, or a slow frame) */
 static unsigned char keys_pressed[SDL_SCANCODE_COUNT];
-#ifndef HALO_ANDROID
 /* the menus' pointer (platform_ui_pointer_set_active), under input_lock */
 static struct platform_ui_pointer ui_pointer;
 static float ui_pointer_wheel;
-#endif
 static pthread_mutex_t input_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* debug keyboard queue */
@@ -63,10 +61,18 @@ BOOL platform_sdl_initialize(void)
 	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 	SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 	/* touching the screen must not aim or fire (the mouse drives the
-	controller emulation in xinput_sdl.c) */
+	controller emulation in xinput_sdl.c), and a mouse event must not become
+	a second touch at the same point, or every tap presses its button twice
+	(the menus flicker open and shut) */
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+	SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
 #endif
-	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS))
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS
+#ifdef HALO_ANDROID
+		/* the touch controls buzz the device (touch_sdl.c) */
+		| SDL_INIT_HAPTIC
+#endif
+		))
 	{
 		platform_log("SDL_Init failed: %s", SDL_GetError());
 		return FALSE;
@@ -789,10 +795,29 @@ void platform_pump_events(void)
 #endif
 			input_state.mouse_wheel += event.wheel.y;
 			break;
+#ifdef HALO_ANDROID
+		case SDL_EVENT_FINGER_DOWN:
+		case SDL_EVENT_FINGER_MOTION:
+		case SDL_EVENT_FINGER_UP:
+		case SDL_EVENT_FINGER_CANCELED:
+			/* the touch controls (touch_sdl.c): a menu's pointer, or a
+			button, or the view the finger drags. The pointer is ours, and
+			we are already holding the lock that guards it, as the mouse
+			above writes it in place */
+			platform_touch_finger(event.tfinger.fingerID,
+				event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_MOTION,
+				event.tfinger.x, event.tfinger.y);
+			platform_touch_pointer(&ui_pointer);
+			break;
+#endif
 		case SDL_EVENT_WINDOW_FOCUS_LOST:
 			memset(input_state.keys, 0, sizeof(input_state.keys));
 			memset(input_state.mouse_buttons, 0, sizeof(input_state.mouse_buttons));
 			input_state.focused = FALSE;
+#ifdef HALO_ANDROID
+			/* a notification, a call: no finger is on the screen */
+			platform_touch_release_all();
+#endif
 			break;
 		case SDL_EVENT_WINDOW_FOCUS_GAINED:
 			input_state.focused = TRUE;
@@ -814,12 +839,13 @@ void platform_pump_events(void)
 	platform_invite_clipboard(look_at_clipboard);
 }
 
-#ifndef HALO_ANDROID
 /* ---------- the menus' pointer */
 
 /* While a menu is up the mouse is released, its pointer shows (centered when
 the menu opens) and its motion, clicks and wheel go to the menus
-(halo_ui_pointer_update, d3d8_gl.c) instead of the controller and the aim. */
+(halo_ui_pointer_update, d3d8_gl.c) instead of the controller and the aim.
+On Android there is no mouse: a finger moves the pointer and a tap clicks
+(touch_sdl.c, which reports where it is as a fraction of the window). */
 void platform_ui_pointer_set_active(BOOL active)
 {
 	if (!platform_window || (active != FALSE) == (input_state.ui_pointer != FALSE))
@@ -833,6 +859,7 @@ void platform_ui_pointer_set_active(BOOL active)
 	input_state.mouse_wheel = 0.0f;
 	memset(input_state.mouse_buttons, 0, sizeof(input_state.mouse_buttons));
 	pthread_mutex_unlock(&input_lock);
+#ifndef HALO_ANDROID
 	platform_mouse_capture(!active && !input_state.mouse_released);
 	if (active)
 	{
@@ -845,6 +872,7 @@ void platform_ui_pointer_set_active(BOOL active)
 		ui_pointer.y = height * 0.5f;
 		pthread_mutex_unlock(&input_lock);
 	}
+#endif
 }
 
 /* what the pointer did since the last call; FALSE when it is not active */
@@ -862,6 +890,15 @@ BOOL platform_ui_pointer_read(struct platform_ui_pointer *pointer)
 	pthread_mutex_unlock(&input_lock);
 	return active;
 }
+
+#ifdef HALO_ANDROID
+/* the device's vibration (SDL_INIT_HAPTIC above) */
+void platform_haptic(int strength, int milliseconds)
+{
+	host_sdl_haptic_pulse((unsigned int)strength, (unsigned int)milliseconds);
+}
+
+#else
 
 void platform_video_window_size(int *width, int *height)
 {

@@ -70,8 +70,51 @@ To make a copy of the saved games, enter
 
 ## Controls
 
-The game reads controllers through the gamepad functions of SDL3. All the
-controllers that Android knows operate. The first controller is player 1.
+The screen has touch controls of its own. They are a controller the port
+makes up (`port/linux/src/touch_sdl.c`): a stick to walk with, buttons, and
+the part of the screen a finger drags to turn the view. The menus take taps,
+and the game's on-screen keyboard takes a d-pad. Which of the three the
+screen shows follows the game, and a screen the game is not listening to
+(loading, a film) has none. Set `input.touch = false` in `config.toml` to
+turn them off and play with a controller or a keyboard only.
+
+| Control | Controller | Function in the game |
+| --- | --- | --- |
+| a finger in the left half | left stick | move: the stick's base is where the finger went down |
+| a finger dragged on the right, on a button or off one | (direct aim) | aim |
+| FIRE | right trigger | fire |
+| A | A | jump, accept |
+| X | X | action, reload |
+| B | B | melee, back |
+| Y | Y | change the weapon |
+| LITE | white | flashlight |
+| DUCK | left stick click | crouch |
+| ZOOM | right stick click | zoom (each tap turns it on or off) |
+| MENU, top right | start | pause menu |
+| BACK, in a menu | B | back |
+| a tap in a menu | | the item below the finger: the same as a click of the mouse |
+| a long press in a menu | B | back |
+| OK, BACK and the d-pad, in the on-screen keyboard | A, B, D-pad | move the selection and choose a key |
+
+The controls keep their size and their place on every display: they are laid
+out in heights of the picture, and fitted to the width where the picture is
+too narrow for them (with `display.screen_width = 640`). A button is
+highlighted while a finger is on it, and the device vibrates when one is
+pressed, and when the game asks for rumble (`XInputSetState`) and there is no
+controller to rumble. The controls buzz only if the device has a motor; a
+phone with no vibration motor simply shows the highlight.
+
+`input.touch_left` puts the stick on the right and the buttons on the left,
+`input.touch_size` (0.6 to 1.5) makes them bigger or smaller,
+`input.touch_sensitivity` sets how far a drag turns the view: a drag across
+a whole height of the picture turns it about a quarter of a turn (86 degrees)
+and a drag across the width of a 20:9 phone most of a turn, at the default
+`1.0`. `input.touch_invert` makes a drag down look up. The drag is counted in
+heights of the picture, so the same drag turns the view the same on every
+display.
+
+The game also reads controllers through the gamepad functions of SDL3. All
+the controllers that Android knows operate. The first controller is player 1.
 The other controllers are players 2 to 4 (split screen). The buttons agree
 with the positions on the Xbox controller:
 
@@ -92,8 +135,7 @@ with the positions on the Xbox controller:
 | Create | back | |
 
 The controller gets the rumble. The back gesture of Android is the B
-button. A Bluetooth or USB keyboard operates as on Linux. The screen does
-not accept touch input.
+button. A Bluetooth or USB keyboard operates as on Linux.
 
 ## Settings
 
@@ -114,6 +156,11 @@ These settings are only for Android:
 | Setting | Function |
 | --- | --- |
 | `display.screen_width` | The number of columns of the 480-line picture. `0` (the default): the shape of the display (1068 on a 20:9 phone). `640`: the 4:3 shape of the Xbox. |
+| `input.touch` | The touch controls of the screen. Refer to "Controls". |
+| `input.touch_sensitivity` | How far a finger's drag turns the view. |
+| `input.touch_invert` | `true`: a drag down looks up. |
+| `input.touch_size` | How big the controls are, 0.6 to 1.5. |
+| `input.touch_left` | `true`: the stick on the right, the buttons on the left. |
 | `debug.sample_seconds` | Refer to "Find problems". |
 
 ## Internet play
@@ -211,7 +258,8 @@ and supplies the thread pointer and TLS.
   memory, because ILP32 code keeps stack addresses in 32-bit registers
   (`host/host_thread.c`).
 - Gives the audio callback of SDL to a thread with a guest stack
-  (`host/host_sdl.c`).
+  (`host/host_sdl.c`), and vibrates the device for the touch controls and
+  for the rumble the game asks a controller for (`host/host_sdl.c`).
 - Does the calls of the guest: system calls (`host/host_syscall.c`), SDL
   (`host/host_sdl.c`), OpenGL ES (`host/host_gl.c`), and the file and socket
   functions of `port/linux/src/posix_*.c`.
@@ -270,6 +318,10 @@ These changes are in `#ifdef HALO_ANDROID`:
   not accept them.
 - A stack walker follows the AArch64 frame records. Thus the log of an
   assertion (`debug.txt`) shows the call sites.
+- `interface/ui_widget.c` tells the touch controls whether a menu, and the
+  game's on-screen keyboard, is up (`halo_ui_pointer_update`), and
+  `game/player_control.c` whether a local player has a unit, since the screen
+  shows the controls of a player in control and nothing else.
 
 The musl of the guest uses its C math, not the AArch64 assembly. The only
 assembly of the port is necessary:
@@ -298,6 +350,8 @@ assembly of the port is necessary:
 - The device must let the app reserve the fixed guest addresses, from
   `0x80000000` to approximately `0x89000000`. If the addresses are not
   available, the app shows a message.
-- The game does not accept touch input. Use a controller or a keyboard.
+- The touch controls use a finger's drag for aim, not a right stick: the
+  view turns as the finger moves, as it does with a mouse. A controller aims
+  with its right stick instead.
 - Kernels with 16 KB pages (a developer option of Android 15) do not
   operate. The Xbox memory uses 4 KB pages.

@@ -5607,7 +5607,7 @@ static void ui_widgets_process_mouse(
 	struct ui_mouse_target *target;
 	short controller_index = 0;
 
-	if (!halo_ui_pointer_update(ui_mouse_menus_active(), &pointer) ||
+	if (!halo_ui_pointer_update(ui_mouse_menus_active(), virtual_keyboard_active(), &pointer) ||
 		virtual_keyboard_active())
 	{
 		ui_mouse_press_count = 0;
