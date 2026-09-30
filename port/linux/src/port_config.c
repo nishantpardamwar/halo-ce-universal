@@ -97,6 +97,22 @@ static const struct config_setting config_settings[] =
 		"slowed and dragged along by a target. The last of the mouse and the\n"
 		"right stick to move decides. The bullets' autoaim (bent toward the\n"
 		"target) stays either way." },
+	{ "input.touch", _config_boolean, "true", "HALO_TOUCH", _environment_set_is_false, _platform_android,
+		"The touch controls of the screen (port/linux/src/touch_sdl.c): a\n"
+		"stick and buttons while a local player is in control of a unit, taps\n"
+		"in the menus, a d-pad in the game's on-screen keyboard. false leaves\n"
+		"a controller or a keyboard to play with." },
+	{ "input.touch_sensitivity", _config_real, "1.0", "HALO_TOUCH_SENSITIVITY", _environment_value, _platform_android,
+		"How far the view turns for a finger dragged across the screen; the\n"
+		"motion is a fraction of the picture's height, so it is the same on\n"
+		"every display." },
+	{ "input.touch_invert", _config_boolean, "false", "HALO_TOUCH_INVERT", _environment_set_is_true, _platform_android,
+		"Dragging a finger down looks up." },
+	{ "input.touch_size", _config_real, "1.0", "HALO_TOUCH_SIZE", _environment_value, _platform_android,
+		"How big the touch controls are, 0.6 to 1.5." },
+	{ "input.touch_left", _config_boolean, "false", "HALO_TOUCH_LEFT", _environment_set_is_true, _platform_android,
+		"Put the movement stick on the right of the screen and the buttons on\n"
+		"the left, for a left-handed player." },
 
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"

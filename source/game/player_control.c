@@ -1055,6 +1055,18 @@ static void get_local_player_input_blob(
 {
 	long player_index = local_player_get_player_index(local_player_index);
 
+#ifdef HALO_ANDROID
+	/* the touch controls, which the Android build has instead of a
+	controller or a keyboard (port/linux/src/touch_sdl.c), while a game is in
+	progress: an intro or a cinematic waits for the player to do something, so
+	they are up before the player has a unit. The menus, which the game
+	reports frame by frame of their own, take them over. */
+	{
+		extern void platform_touch_player(int playing);
+
+		platform_touch_player(1);
+	}
+#endif
 	player_action_clear(input);
 	if (player_index != NONE)
 	{

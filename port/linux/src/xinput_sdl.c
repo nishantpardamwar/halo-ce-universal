@@ -23,7 +23,9 @@ motion, buttons and wheel do not reach the controller then.
 
 Mouse aim does not go through the right stick: the game's look code asks
 halo_linux_mouse_look for the motion since its last call and adds it to the
-stick's facing change, so aiming is direct rather than rate based.
+stick's facing change, so aiming is direct rather than rate based. The touch
+controls of the Android build (port/linux/src/touch_sdl.c) aim the same way,
+by dragging a finger.
 
 The game's debug keyboard exists only for the console. Backquote (which
 opens it) always reaches the keystroke queue, everything else only while
@@ -100,8 +102,26 @@ static float mouse_sensitivity(void)
 	return sensitivity;
 }
 
-/* radians of yaw and pitch for the mouse motion since the last call; the
-game adds these to the facing change of the player on gamepad 0 */
+#ifdef HALO_ANDROID
+/* the touch controls (port/linux/src/touch_sdl.c): how far the view turns
+for a finger's drag, which is a fraction of the picture's height, so the
+same drag turns the view the same on every display */
+static float touch_sensitivity(void)
+{
+	static float sensitivity = -1.0f;
+
+	if (sensitivity < 0.0f)
+	{
+		sensitivity = (float)config_real("input.touch_sensitivity");
+		if (sensitivity <= 0.0f)
+			sensitivity = 1.0f;
+	}
+	return sensitivity;
+}
+#endif
+
+/* radians of yaw and pitch for the mouse and touch motion since the last
+call; the game adds these to the facing change of the player on gamepad 0 */
 int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 {
 	/* radians per pixel of relative motion at sensitivity 1 */
@@ -122,11 +142,35 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 	mouse_pending_y = 0.0f;
 	mouse_polls_unconsumed = 0;
 	pthread_mutex_unlock(&mouse_lock);
-	if (x == 0.0f && y == 0.0f)
-		return FALSE;
 	*yaw = -x * scale * mouse_sensitivity();
 	*pitch = (invert ? y : -y) * scale * mouse_sensitivity();
-	return TRUE;
+#ifdef HALO_ANDROID
+	{
+		/* the touch controls (port/linux/src/touch_sdl.c) aim as the mouse
+		does; only their motion is in heights of the picture, so the same
+		drag turns the view the same way on every display */
+		const float touch_scale = 1.5f;	/* radians for a whole height of it */
+		static int touch_invert = -1;
+		float touch_x = 0.0f, touch_y = 0.0f;
+
+		platform_touch_look(&touch_x, &touch_y);
+		if (touch_invert < 0)
+			touch_invert = config_boolean("input.touch_invert");
+		if (touch_x != 0.0f || touch_y != 0.0f)
+		{
+			float sensitivity = touch_sensitivity();
+
+			*yaw += -touch_x * touch_scale * sensitivity;
+			*pitch += (touch_invert ? touch_y : -touch_y) * touch_scale * sensitivity;
+			/* a finger's aim counts as aiming, as the mouse's does
+			(halo_linux_mouse_aiming) */
+			pthread_mutex_lock(&mouse_lock);
+			mouse_aimed_ms = SDL_GetTicks();
+			pthread_mutex_unlock(&mouse_lock);
+		}
+	}
+#endif
+	return *yaw != 0.0f || *pitch != 0.0f;
 }
 
 /* whether the player on the gamepad aims with the mouse (it moved after the
@@ -544,7 +588,14 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		mouse_poll(&input);
 		wheel_update();
 		if (!console_is_active())
+		{
 			keyboard_gamepad(&input, &state->Gamepad);
+#ifdef HALO_ANDROID
+			/* the touch controls (port/linux/src/touch_sdl.c) are the
+			controller of an Android build without one */
+			platform_touch_gamepad(&state->Gamepad);
+#endif
+		}
 		if (count > 0)
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
 		test_input_gamepad(&state->Gamepad);
@@ -589,6 +640,19 @@ DWORD WINAPI XInputSetState(HANDLE device, PXINPUT_FEEDBACK feedback)
 		SDL_RumbleGamepad(gamepads[port], feedback->Rumble.wLeftMotorSpeed,
 			feedback->Rumble.wRightMotorSpeed, 100);
 	}
+#ifdef HALO_ANDROID
+	else
+	{
+		/* player one's controller is the touch controls, and the phone has
+		no motors for it: the device's vibration stands in for the rumble
+		the game asks for */
+		int speed = feedback->Rumble.wLeftMotorSpeed > feedback->Rumble.wRightMotorSpeed ?
+			feedback->Rumble.wLeftMotorSpeed : feedback->Rumble.wRightMotorSpeed;
+
+		if (port == 0 && speed >= 0x400)
+			platform_haptic(speed * 100 / 0xffff, 100);
+	}
+#endif
 	return ERROR_SUCCESS;
 }
 

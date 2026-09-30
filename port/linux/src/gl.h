@@ -113,6 +113,7 @@ this list to generate the guest's entry points */
 	X(glGetShaderInfoLog) \
 	X(glDeleteShader) \
 	X(glCreateProgram) \
+	X(glDeleteProgram) \
 	X(glAttachShader) \
 	X(glBindAttribLocation) \
 	X(glLinkProgram) \
@@ -123,8 +124,12 @@ this list to generate the guest's entry points */
 	X(glUniform1i) \
 	X(glUniform1iv) \
 	X(glUniform1f) \
-	X(glUniform4fv) \
+	X(glUniform1fv) \
 	X(glUniform2f) \
+	X(glUniform2fv) \
+	X(glUniform3f) \
+	X(glUniform4f) \
+	X(glUniform4fv) \
 	X(glGenQueries) \
 	X(glBeginQuery) \
 	X(glEndQuery) \
@@ -228,8 +233,12 @@ this list to generate the guest's entry points */
 	X(glUniform1i) \
 	X(glUniform1iv) \
 	X(glUniform1f) \
-	X(glUniform4fv) \
+	X(glUniform1fv) \
 	X(glUniform2f) \
+	X(glUniform2fv) \
+	X(glUniform3f) \
+	X(glUniform4f) \
+	X(glUniform4fv) \
 	X(glGenQueries) \
 	X(glBeginQuery) \
 	X(glEndQuery) \
@@ -328,6 +337,7 @@ pointers, sees the declarations without these aliases */
 #define glGetShaderInfoLog halo_glGetShaderInfoLog
 #define glDeleteShader halo_glDeleteShader
 #define glCreateProgram halo_glCreateProgram
+#define glDeleteProgram halo_glDeleteProgram
 #define glAttachShader halo_glAttachShader
 #define glBindAttribLocation halo_glBindAttribLocation
 #define glLinkProgram halo_glLinkProgram
@@ -338,8 +348,12 @@ pointers, sees the declarations without these aliases */
 #define glUniform1i halo_glUniform1i
 #define glUniform1iv halo_glUniform1iv
 #define glUniform1f halo_glUniform1f
-#define glUniform4fv halo_glUniform4fv
+#define glUniform1fv halo_glUniform1fv
 #define glUniform2f halo_glUniform2f
+#define glUniform2fv halo_glUniform2fv
+#define glUniform3f halo_glUniform3f
+#define glUniform4f halo_glUniform4f
+#define glUniform4fv halo_glUniform4fv
 #define glGenQueries halo_glGenQueries
 #define glBeginQuery halo_glBeginQuery
 #define glEndQuery halo_glEndQuery
@@ -441,8 +455,12 @@ pointers, sees the declarations without these aliases */
 #define glUniform1i halo_glUniform1i
 #define glUniform1iv halo_glUniform1iv
 #define glUniform1f halo_glUniform1f
-#define glUniform4fv halo_glUniform4fv
+#define glUniform1fv halo_glUniform1fv
 #define glUniform2f halo_glUniform2f
+#define glUniform2fv halo_glUniform2fv
+#define glUniform3f halo_glUniform3f
+#define glUniform4f halo_glUniform4f
+#define glUniform4fv halo_glUniform4fv
 #define glGenQueries halo_glGenQueries
 #define glBeginQuery halo_glBeginQuery
 #define glEndQuery halo_glEndQuery
