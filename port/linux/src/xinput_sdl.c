@@ -102,24 +102,6 @@ static float mouse_sensitivity(void)
 	return sensitivity;
 }
 
-#ifdef HALO_ANDROID
-/* the touch controls (port/linux/src/touch_sdl.c): how far the view turns
-for a finger's drag, which is a fraction of the picture's height, so the
-same drag turns the view the same on every display */
-static float touch_sensitivity(void)
-{
-	static float sensitivity = -1.0f;
-
-	if (sensitivity < 0.0f)
-	{
-		sensitivity = (float)config_real("input.touch_sensitivity");
-		if (sensitivity <= 0.0f)
-			sensitivity = 1.0f;
-	}
-	return sensitivity;
-}
-#endif
-
 /* radians of yaw and pitch for the mouse and touch motion since the last
 call; the game adds these to the facing change of the player on gamepad 0 */
 int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
@@ -148,7 +130,9 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 	{
 		/* the touch controls (port/linux/src/touch_sdl.c) aim as the mouse
 		does; only their motion is in heights of the picture, so the same
-		drag turns the view the same way on every display */
+		drag turns the view the same way on every display, and how far it
+		turns is theirs to say, since their options panel can change it while
+		the game runs */
 		const float touch_scale = 1.5f;	/* radians for a whole height of it */
 		static int touch_invert = -1;
 		float touch_x = 0.0f, touch_y = 0.0f;
@@ -158,7 +142,7 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 			touch_invert = config_boolean("input.touch_invert");
 		if (touch_x != 0.0f || touch_y != 0.0f)
 		{
-			float sensitivity = touch_sensitivity();
+			float sensitivity = platform_touch_sensitivity();
 
 			*yaw += -touch_x * touch_scale * sensitivity;
 			*pitch += (touch_invert ? touch_y : -touch_y) * touch_scale * sensitivity;

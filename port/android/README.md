@@ -87,11 +87,14 @@ turn them off and play with a controller or a keyboard only.
 | X | X | action, reload |
 | B | B | melee, back |
 | Y | Y | change the weapon |
+| FRAG | left trigger | throw a grenade |
+| GREN | black | change the grenade |
 | LITE | white | flashlight |
 | DUCK | left stick click | crouch |
 | ZOOM | right stick click | zoom (each tap turns it on or off) |
 | MENU, top right | start | pause menu |
 | BACK, in a menu | B | back |
+| OPT, beside MENU or BACK | | the settings panel, which is the port's own |
 | a tap in a menu | | the item below the finger: the same as a click of the mouse |
 | a long press in a menu | B | back |
 | OK, BACK and the d-pad, in the on-screen keyboard | A, B, D-pad | move the selection and choose a key |
@@ -106,12 +109,35 @@ phone with no vibration motor simply shows the highlight.
 
 `input.touch_left` puts the stick on the right and the buttons on the left,
 `input.touch_size` (0.6 to 1.5) makes them bigger or smaller,
-`input.touch_sensitivity` sets how far a drag turns the view: a drag across
-a whole height of the picture turns it about a quarter of a turn (86 degrees)
-and a drag across the width of a 20:9 phone most of a turn, at the default
-`1.0`. `input.touch_invert` makes a drag down look up. The drag is counted in
-heights of the picture, so the same drag turns the view the same on every
-display.
+`input.touch_sensitivity` sets how far a drag on the buttons' side turns the
+view: a drag across a whole height of the picture turns it about a quarter of
+a turn (86 degrees) and a drag across the width of a 20:9 phone most of a
+turn, at the default `1.0`. Raise it to turn faster (`2.0` is twice, `3.0`
+three times) and lower it for finer aim (`0.5` is half). `input.touch_invert`
+makes a drag down look up. The drag is counted in heights of the picture, so
+the same drag turns the view the same on every display.
+
+The OPT button opens a panel of the settings that can be changed while the
+game runs, a slider each: SENS is `input.touch_sensitivity`, from `0.25` to
+`4.00` in steps of `0.05`. Drag a track, or tap where on it the value should
+be, and the view turns with it at once; let go and it is written into
+`config.toml`, so it is still there next time. Opened from a game, the panel
+pauses it first (the game's own pause menu is behind the panel, and closing
+the panel leaves it), so nothing walks into a bullet while a thumb is picking
+a number. The panel takes every finger while it is up, so a finger on it
+cannot press a control behind it, and X, at the panel's top corner, closes
+it.
+
+A setting the panel does not offer is read once, when the app starts: to
+change one, edit `config.toml` in the app's own folder
+(`/sdcard/Android/data/com.halo.decomp/files`) under `[input]`, for example:
+
+```toml
+[input]
+touch_sensitivity = 2.0
+```
+
+Then close the app and start it again.
 
 The game also reads controllers through the gamepad functions of SDL3. All
 the controllers that Android knows operate. The first controller is player 1.
