@@ -21,5 +21,8 @@ const char *config_string(const char *name);
 /* sets a boolean setting, and writes it into config.toml (only its line
 changes); 1 on success */
 int config_write_boolean(const char *name, int value);
+/* the same for a real setting, which is what a slider in the game offers
+while it runs (the touch controls' options panel, touch_sdl.c) */
+int config_write_real(const char *name, double value);
 
 #endif

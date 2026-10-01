@@ -96,6 +96,10 @@ void platform_touch_gamepad(XINPUT_GAMEPAD *pad);
 /* the view's turn since the last call, in heights of the picture with y
 down (xinput_sdl.c's halo_linux_mouse_look) */
 void platform_touch_look(float *x, float *y);
+/* how far a finger's drag turns the view: the options panel's slider once it
+has been opened, and input.touch_sensitivity until then (the panel writes it
+into config.toml, so it is read again the next time the game starts) */
+float platform_touch_sensitivity(void);
 /* the controls, drawn over the picture at presentation (d3d8_gl.c) */
 void platform_touch_draw(const struct platform_touch_rect *rect);
 /* what the fingers did to a menu's pointer since the last call, put into

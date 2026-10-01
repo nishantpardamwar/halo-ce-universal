@@ -36,7 +36,11 @@ never lost. The device vibrates for a press and for the rumble the game asks
 its controller for (xinput_sdl.c), if it has a motor.
 
 The settings (config.toml's [input]) are input.touch, input.touch_sensitivity,
-input.touch_invert, input.touch_size and input.touch_left.
+input.touch_invert, input.touch_size and input.touch_left. The button beside
+MENU and BACK (OPT) opens a panel of the ones that can be changed while the
+game runs, a slider each, over a game the panel pauses with the menu button's
+own button: a setting moved there is written into config.toml, so it is there
+next time, and the rest of this run turns the view with it at once.
 
 Everything here runs on the game's thread: the events are pumped by
 platform_pump_events (which only runs on the thread that owns the window), the
@@ -54,6 +58,7 @@ the game presents. So none of this needs a lock.
 
 #include <SDL3/SDL.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ---------- the labels' font
@@ -63,7 +68,11 @@ label is drawn one quad a character with the same program as the buttons. */
 
 #define GLYPH_COLUMNS 5
 #define GLYPH_ROWS 7
-#define NUMBER_OF_GLYPHS 31 /* A to Z, then ^, v, <, > and the space */
+/* A to Z, then ^, v, <, > and the space, then the digits (for the values the
+options panel shows) and a point between them */
+#define GLYPH_FIRST_DIGIT 31
+#define GLYPH_POINT 41
+#define NUMBER_OF_GLYPHS 42
 
 static const unsigned char touch_font[NUMBER_OF_GLYPHS][GLYPH_COLUMNS] =
 {
@@ -98,12 +107,25 @@ static const unsigned char touch_font[NUMBER_OF_GLYPHS][GLYPH_COLUMNS] =
 	{ 0x08, 0x14, 0x22, 0x41, 0x00 },	/* < */
 	{ 0x00, 0x41, 0x22, 0x14, 0x08 },	/* > */
 	{ 0x00, 0x00, 0x00, 0x00, 0x00 },	/* the space */
+	{ 0x3e, 0x51, 0x49, 0x45, 0x3e },	/* 0 */
+	{ 0x00, 0x42, 0x7f, 0x40, 0x00 },	/* 1 */
+	{ 0x42, 0x61, 0x51, 0x49, 0x46 },	/* 2 */
+	{ 0x21, 0x41, 0x45, 0x4b, 0x31 },	/* 3 */
+	{ 0x18, 0x14, 0x12, 0x7f, 0x10 },	/* 4 */
+	{ 0x27, 0x45, 0x45, 0x45, 0x39 },	/* 5 */
+	{ 0x3c, 0x4a, 0x49, 0x49, 0x30 },	/* 6 */
+	{ 0x01, 0x71, 0x09, 0x05, 0x03 },	/* 7 */
+	{ 0x36, 0x49, 0x49, 0x49, 0x36 },	/* 8 */
+	{ 0x06, 0x49, 0x49, 0x29, 0x1e },	/* 9 */
+	{ 0x00, 0x60, 0x60, 0x00, 0x00 },	/* . */
 };
 
 static int glyph_index(char character)
 {
 	if (character >= 'A' && character <= 'Z')
 		return character - 'A';
+	if (character >= '0' && character <= '9')
+		return GLYPH_FIRST_DIGIT + character - '0';
 	switch (character)
 	{
 	case '^': return 26;
@@ -111,6 +133,7 @@ static int glyph_index(char character)
 	case '<': return 28;
 	case '>': return 29;
 	case ' ': return 30;
+	case '.': return GLYPH_POINT;
 	default: return -1;
 	}
 }
@@ -122,7 +145,8 @@ enum touch_kind
 {
 	_touch_kind_button,	/* a button of the pad, while the finger is on it */
 	_touch_kind_toggle,	/* a button that stays on until it is pressed again */
-	_touch_kind_back	/* the menus' and the keyboard's way back */
+	_touch_kind_back,	/* the menus' and the keyboard's way back */
+	_touch_kind_options	/* the options panel, which is not the pad's */
 };
 
 /* which edge of the picture a control is placed from: the buttons' side, or
@@ -135,7 +159,9 @@ enum touch_side
 
 /* a control of a layout, in heights of the picture from the edge named: the
 same shape on every display, and fitted to the width where the picture is
-too narrow for it */
+too narrow for it. From the corner, `edge` is from its side and `bottom` is
+how far down from the top of the picture it is, so a second control can sit
+beside the first. */
 struct touch_entry
 {
 	enum touch_kind kind;
@@ -164,7 +190,10 @@ static const struct touch_entry touch_game_entries[] =
 	{ _touch_kind_button, "B", 0.607f, 0.320f, 0.056f, 0.072f, XINPUT_GAMEPAD_B, 0, _touch_side_pad },
 	{ _touch_kind_button, "DUCK", 0.347f, 0.080f, 0.058f, 0.075f, TOUCH_NO_ANALOG, XINPUT_GAMEPAD_LEFT_THUMB, _touch_side_pad },
 	{ _touch_kind_button, "Y", 0.325f, 0.650f, 0.054f, 0.072f, XINPUT_GAMEPAD_Y, 0, _touch_side_pad },
+	{ _touch_kind_button, "FRAG", 0.650f, 0.670f, 0.054f, 0.072f, XINPUT_GAMEPAD_LEFT_TRIGGER, 0, _touch_side_pad },
+	{ _touch_kind_button, "GREN", 0.488f, 0.660f, 0.050f, 0.072f, XINPUT_GAMEPAD_BLACK, 0, _touch_side_pad },
 	{ _touch_kind_button, "MENU", 0.075f, 0.075f, 0.042f, 0.070f, TOUCH_NO_ANALOG, XINPUT_GAMEPAD_START, _touch_side_corner },
+	{ _touch_kind_options, "OPT", 0.255f, 0.075f, 0.050f, 0.080f, TOUCH_NO_ANALOG, 0, _touch_side_corner },
 };
 
 /* the game's on-screen keyboard: what a controller's buttons do to it */
@@ -178,10 +207,12 @@ static const struct touch_entry touch_keyboard_entries[] =
 	{ _touch_kind_button, ">", 0.555f, 0.380f, 0.070f, 0.098f, TOUCH_NO_ANALOG, XINPUT_GAMEPAD_DPAD_RIGHT, _touch_side_pad },
 };
 
-/* a menu: the pointer picks what is tapped, and a button for the way back */
+/* a menu: the pointer picks what is tapped, and a button for the way back and
+one for the settings */
 static const struct touch_entry touch_menu_entries[] =
 {
 	{ _touch_kind_back, "BACK", 0.085f, 0.085f, 0.062f, 0.090f, XINPUT_GAMEPAD_B, 0, _touch_side_corner },
+	{ _touch_kind_options, "OPT", 0.295f, 0.085f, 0.062f, 0.090f, TOUCH_NO_ANALOG, 0, _touch_side_corner },
 };
 
 /* a control once it is placed in the picture */
@@ -202,6 +233,11 @@ struct touch_control
 #define TOUCH_CONTROL_POINT (-4)	/* a menu's pointer */
 #define TOUCH_CONTROL_FROZEN (-5)	/* committed to something under the old
 									   layout: inert until the finger lifts */
+#define TOUCH_CONTROL_PANEL (-6)	/* the options panel, which is not a
+									   control: inert */
+#define TOUCH_CONTROL_PANEL_CLOSE (-7)	/* the button that closes it */
+#define TOUCH_CONTROL_PANEL_SLIDER (-8)	/* one of its tracks: which one is in
+										   the finger's slider */
 
 /* how far the floating stick's knob may go from its base, in heights of the
 picture */
@@ -219,10 +255,6 @@ picture, and how long it may be held to be a long press instead */
 before it is dropped, as the mouse's is (xinput_sdl.c) */
 #define TOUCH_LOOK_POLLS 4
 
-/* how long the grenade button is held to change the grenade, which has no
-button of its own (the Xbox's black button) */
-#define TOUCH_GRENADE_HOLD_MS 400
-
 /* a signal from the game that stops arriving (a loading screen, a film, the
 time before the player is in the level) takes the controls away */
 #define TOUCH_SIGNAL_TIMEOUT_MS 700
@@ -239,6 +271,8 @@ struct touch_finger
 {
 	BOOL down;		/* a finger of ours is on the screen */
 	int control;		/* what it holds: a control, or one of the above */
+	int slider;		/* which of the options panel's tracks, where it is on
+						one */
 	float x, y;		/* the picture's pixels, y down */
 	float start_x, start_y;	/* where it went down */
 	float normalized_x, normalized_y;	/* the window's, as SDL reports them */
@@ -273,8 +307,6 @@ lock, so this only notes it down */
 static struct platform_ui_pointer touch_pointer;
 static BOOL touch_pointer_moved;
 static int touch_pointer_clicks, touch_pointer_right_clicks;
-/* whether the finger on the grenade button has already changed the grenade */
-static BOOL touch_grenade_switched;
 /* the view's turn since the game last read it, in heights of the picture */
 static float touch_look_x, touch_look_y;
 static int touch_look_polls;
@@ -330,6 +362,313 @@ static float touch_size(void)
 			size = 1.5f;
 	}
 	return size;
+}
+
+/* ---------- the options panel
+
+The settings the screen offers while the game runs: a slider each, over the
+controls, with a game paused behind it (its own pause menu, opened and closed
+with the button the menu button presses, so nothing walks into a bullet while
+a thumb is picking a number). A setting moved here is written into
+config.toml (config_write_real), so it is still there next time, and the rest
+of this run uses it at once (the game reads it through
+platform_touch_sensitivity as the finger moves). The panel takes every finger
+while it is up, so a finger on it cannot press a control behind it, and only
+the button on its top corner closes it. */
+
+struct touch_setting
+{
+	const char *label;		/* above its track */
+	const char *name;		/* the setting in config.toml */
+	float value;			/* where it is now */
+	float low, high, step;	/* the range the track slides over, and the step
+								   it moves in */
+	float started;			/* the value it was read at, so a track the
+								   player did not move writes nothing */
+};
+
+/* the settings on offer, each within the range that is any use for it */
+static struct touch_setting touch_settings[] =
+{
+	/* how far a drag on the buttons' side turns the view: the mouse's
+	input.mouse_sensitivity is the same idea, and this is its touch one */
+	{ "SENS", "input.touch_sensitivity", 1.0f, 0.25f, 4.00f, 0.05f, 1.0f },
+};
+
+#define TOUCH_SETTING_COUNT ((int)(sizeof(touch_settings) / sizeof(touch_settings[0])))
+
+/* the settings as the file has them, read the first time the panel opens, and
+which of them is the one the view's turn is read through (xinput_sdl.c's
+halo_linux_mouse_look) */
+static BOOL touch_settings_ready = FALSE;
+static int touch_setting_sensitivity = -1;
+
+/* a box in the picture's pixels, y down: the panel, its tracks and the button
+that closes it, all placed with the controls so that what is drawn, hit and
+pressed agree */
+struct touch_box
+{
+	float x, y;			/* the middle */
+	float half_width, half_height;
+};
+
+/* the panel, and what is on it */
+static BOOL touch_options = FALSE;
+static struct touch_box touch_panel_box;
+static struct touch_box touch_close_box;
+static struct touch_box touch_slider_box[TOUCH_SETTING_COUNT];
+/* the panel opened a game's pause menu behind itself, and has seen it up, so
+closing can leave it again: a game ignores the pause for a second after a
+level loads, and pressing the button then would pause a game the panel never
+stopped */
+static BOOL touch_options_paused, touch_options_pause_seen;
+/* the buttons the panel presses for itself, rather than a control of a layout:
+the pause menu it opened behind itself, or the one it leaves */
+static unsigned short touch_panel_buttons;
+
+/* the panel, in heights of the picture */
+#define TOUCH_PANEL_WIDTH 0.420f	/* its half width */
+#define TOUCH_PANEL_TOP 0.145f	/* above its first track, where its title is */
+#define TOUCH_PANEL_BOTTOM 0.075f	/* below its last */
+#define TOUCH_PANEL_TITLE 0.052f	/* the title's own space below that edge */
+#define TOUCH_TRACK_WIDTH 0.300f	/* a track's half width */
+#define TOUCH_TRACK_HEIGHT 0.014f	/* a track's half height */
+#define TOUCH_SLIDER_SPACING 0.110f	/* between the tracks */
+#define TOUCH_SLIDER_TOUCH 0.050f	/* how far off a track a finger still
+									   drags it */
+#define TOUCH_KNOB_RADIUS 0.026f
+#define TOUCH_LABEL_GAP 0.042f	/* a label above its track */
+#define TOUCH_TEXT_HEIGHT 0.024f	/* a label's height */
+#define TOUCH_TITLE_HEIGHT 0.030f
+#define TOUCH_CLOSE_RADIUS 0.045f	/* the button that closes the panel */
+#define TOUCH_CLOSE_TOUCH 0.030f	/* how far past it a finger still closes */
+
+/* which of the panel's settings a name is, or -1 */
+static int touch_setting_index(const char *name)
+{
+	int index;
+
+	for (index = 0; index < TOUCH_SETTING_COUNT; index++)
+	{
+		if (!strcmp(touch_settings[index].name, name))
+			return index;
+	}
+	return -1;
+}
+
+/* the settings as config.toml has them, the first time the panel is opened */
+static void touch_settings_load(void)
+{
+	int index;
+
+	if (touch_settings_ready)
+		return;
+	touch_settings_ready = TRUE;
+	for (index = 0; index < TOUCH_SETTING_COUNT; index++)
+	{
+		struct touch_setting *setting = &touch_settings[index];
+		float value = (float)config_real(setting->name);
+
+		/* a value outside the range a track slides over is of no use to the
+		track or to the game that reads it, so the end nearest it is taken,
+		and said in the log */
+		if (value < setting->low || value > setting->high)
+		{
+			platform_log("touch: %s = %g is outside %g to %g", setting->name, (double)value,
+				(double)setting->low, (double)setting->high);
+			value = value < setting->low ? setting->low : setting->high;
+		}
+		setting->value = value;
+		setting->started = value;
+	}
+	touch_setting_sensitivity = touch_setting_index("input.touch_sensitivity");
+}
+
+/* how far a finger's drag turns the view: the panel's slider once the panel
+has been opened (which reads the setting into it), the setting itself until
+then */
+float platform_touch_sensitivity(void)
+{
+	static float sensitivity = -1.0f;
+
+	if (touch_settings_ready && touch_setting_sensitivity >= 0)
+		return touch_settings[touch_setting_sensitivity].value;
+	if (sensitivity <= 0.0f)
+	{
+		sensitivity = (float)config_real("input.touch_sensitivity");
+		if (sensitivity <= 0.0f)
+			sensitivity = 1.0f;
+	}
+	return sensitivity;
+}
+
+/* the panel and what is on it, in the picture */
+static void touch_place_panel(void)
+{
+	int index;
+
+	for (index = 0; index < TOUCH_SETTING_COUNT; index++)
+	{
+		struct touch_box *track = &touch_slider_box[index];
+
+		track->x = (float)touch_picture_width * 0.5f;
+		track->y = (float)touch_picture_height * 0.5f +
+			(index - (TOUCH_SETTING_COUNT - 1) * 0.5f) * TOUCH_SLIDER_SPACING * touch_unit;
+		track->half_width = TOUCH_TRACK_WIDTH * touch_unit;
+		track->half_height = TOUCH_TRACK_HEIGHT * touch_unit;
+	}
+	touch_panel_box.x = (float)touch_picture_width * 0.5f;
+	touch_panel_box.y = (touch_slider_box[0].y - TOUCH_PANEL_TOP * touch_unit +
+		touch_slider_box[TOUCH_SETTING_COUNT - 1].y + TOUCH_PANEL_BOTTOM * touch_unit) * 0.5f;
+	touch_panel_box.half_width = TOUCH_PANEL_WIDTH * touch_unit;
+	touch_panel_box.half_height = (TOUCH_PANEL_TOP + TOUCH_PANEL_BOTTOM +
+		TOUCH_SLIDER_SPACING * (TOUCH_SETTING_COUNT - 1)) * touch_unit * 0.5f;
+	/* the button that closes it, on the panel's top corner */
+	touch_close_box.x = touch_panel_box.x + touch_panel_box.half_width -
+		TOUCH_CLOSE_RADIUS * touch_unit;
+	touch_close_box.y = touch_panel_box.y - touch_panel_box.half_height +
+		TOUCH_CLOSE_RADIUS * touch_unit;
+	touch_close_box.half_width = TOUCH_CLOSE_RADIUS * touch_unit;
+	touch_close_box.half_height = TOUCH_CLOSE_RADIUS * touch_unit;
+}
+
+/* whether a point is in a box, or within `reach` of it (a thumb, not a
+fingertip) */
+static BOOL touch_box_at(const struct touch_box *box, float x, float y, float reach)
+{
+	return fabsf(x - box->x) <= box->half_width + reach &&
+		fabsf(y - box->y) <= box->half_height + reach;
+}
+
+/* the panel's track a point is on, or -1 */
+static int touch_slider_at(float x, float y)
+{
+	float reach = (TOUCH_SLIDER_TOUCH - TOUCH_TRACK_HEIGHT) * touch_unit;
+	int index;
+
+	for (index = 0; index < TOUCH_SETTING_COUNT; index++)
+	{
+		if (touch_box_at(&touch_slider_box[index], x, y, reach))
+			return index;
+	}
+	return -1;
+}
+
+/* what the panel does with a finger: its own controls and nothing else at
+all, since it is over the controls and the player may well be holding one of
+them with another finger */
+static int touch_control_in_panel(float x, float y)
+{
+	if (touch_box_at(&touch_close_box, x, y, TOUCH_CLOSE_TOUCH * touch_unit))
+		return TOUCH_CONTROL_PANEL_CLOSE;
+	if (touch_slider_at(x, y) >= 0)
+		return TOUCH_CONTROL_PANEL_SLIDER;
+	return TOUCH_CONTROL_PANEL;
+}
+
+/* where a setting's value is along its track: 0 at the low end and 1 at the
+high one, with a value outside the range (which the file may hold) at the end
+nearest it */
+static float touch_slider_fraction(int index)
+{
+	const struct touch_setting *setting = &touch_settings[index];
+	float range = setting->high - setting->low;
+	float fraction = range > 0.0f ? (setting->value - setting->low) / range : 0.0f;
+
+	if (fraction < 0.0f)
+		fraction = 0.0f;
+	if (fraction > 1.0f)
+		fraction = 1.0f;
+	return fraction;
+}
+
+/* a finger along a track: the value is where along it the finger is, in the
+setting's own steps, so that the file holds a round number */
+static void touch_slider_drag(int index, float x)
+{
+	const struct touch_box *track = &touch_slider_box[index];
+	struct touch_setting *setting = &touch_settings[index];
+	float fraction, value;
+
+	if (track->half_width <= 0.0f)
+		return;
+	fraction = (x - (track->x - track->half_width)) / (track->half_width * 2.0f);
+	if (fraction < 0.0f)
+		fraction = 0.0f;
+	if (fraction > 1.0f)
+		fraction = 1.0f;
+	value = setting->low + fraction * (setting->high - setting->low);
+	if (setting->step > 0.0f)
+		value = setting->low +
+			floorf((value - setting->low) / setting->step + 0.5f) * setting->step;
+	if (value < setting->low)
+		value = setting->low;
+	if (value > setting->high)
+		value = setting->high;
+	setting->value = value;
+}
+
+/* a finger off a track: the setting goes into config.toml, so it is there
+next time as well */
+static void touch_slider_commit(int index)
+{
+	struct touch_setting *setting = &touch_settings[index];
+
+	if (setting->value < setting->low)
+		setting->value = setting->low;
+	if (setting->value > setting->high)
+		setting->value = setting->high;
+	if (setting->value == setting->started)
+		return;	/* the player did not move it: nothing to write */
+	setting->started = setting->value;
+	if (config_write_real(setting->name, setting->value))
+		platform_log("touch: %s = %g", setting->name, (double)setting->value);
+	else
+		platform_log("touch: cannot write %s = %g", setting->name, (double)setting->value);
+	platform_haptic(PLATFORM_HAPTIC_PRESS, 18);
+}
+
+/* the panel, up over the controls */
+static void touch_options_open(void)
+{
+	touch_options = TRUE;
+	touch_settings_load();
+	touch_place_panel();
+	/* a game must not carry on under the panel, so its own pause menu is
+	opened behind it with the same button the menu button presses */
+	touch_options_paused = touch_layout == _touch_layout_game;
+	touch_options_pause_seen = FALSE;
+	if (touch_options_paused)
+		touch_panel_buttons |= XINPUT_GAMEPAD_START;
+	platform_log("touch: the options panel is up");
+	platform_haptic(PLATFORM_HAPTIC_PRESS, 18);
+}
+
+static void touch_options_close(void)
+{
+	/* the pause menu the panel opened behind itself is left with the same
+	button, but only if it did open: a game ignores the pause for a second
+	after a level loads, and pressing the button then would pause a game the
+	panel never stopped */
+	touch_panel_buttons = touch_options_paused && touch_options_pause_seen ?
+		XINPUT_GAMEPAD_START : 0;
+	touch_options = FALSE;
+	touch_options_paused = FALSE;
+	touch_options_pause_seen = FALSE;
+	platform_haptic(PLATFORM_HAPTIC_PRESS, 12);
+}
+
+/* the finger holding one of the panel's own controls, or NULL */
+static struct touch_finger *touch_panel_finger(int control)
+{
+	int index;
+
+	for (index = 0; index < TOUCH_FINGER_COUNT; index++)
+	{
+		if (touch_fingers[index].down && touch_fingers[index].control == control)
+			return &touch_fingers[index];
+	}
+	return NULL;
 }
 
 /* ---------- what the game says */
@@ -441,18 +780,21 @@ static void touch_place(void)
 		/* the xdk names the face buttons by their place in bAnalogButtons and
 		the rest by their bit in wButtons, so a mask put in one column lands
 		outright outside the other's array: say so rather than press nothing */
-		if (entry->analog != TOUCH_NO_ANALOG && (entry->analog < 0 || entry->analog >= 14))
+		if (entry->kind != _touch_kind_options && entry->analog != TOUCH_NO_ANALOG &&
+			(entry->analog < 0 || entry->analog >= 14))
 		{
 			platform_log("touch: %s: %.0x is a wButtons mask, not a bAnalogButtons index",
 				entry->label, (float)entry->analog);
 			control->analog = TOUCH_NO_ANALOG;
 		}
-		if (entry->analog == TOUCH_NO_ANALOG && !entry->mask)
+		if (entry->kind != _touch_kind_options && entry->analog == TOUCH_NO_ANALOG && !entry->mask)
 			platform_log("touch: %s: no button", entry->label);
 		if (entry->side == _touch_side_corner)
 		{
+			/* from the corner, `bottom` is how far down it is, so that a
+			second control can sit beside the first */
 			control->x = touch_mirrored ? (float)edge : (float)(touch_picture_width - edge);
-			control->y = (float)edge;
+			control->y = (float)bottom;
 		}
 		else
 		{
@@ -478,6 +820,10 @@ static int touch_control_at(float x, float y)
 	float best = 0.0f;
 	int index;
 
+	/* the options panel is over the controls and takes every finger, so that
+	a finger on it cannot press a button behind it */
+	if (touch_options)
+		return touch_control_in_panel(x, y);
 	for (index = 0; index < touch_control_count; index++)
 	{
 		const struct touch_control *control = &touch_controls[index];
@@ -514,8 +860,22 @@ static void touch_take(struct touch_finger *finger, BOOL press)
 	int control = touch_control_at(finger->x, finger->y);
 
 	finger->control = control;
+	finger->slider = touch_options ? touch_slider_at(finger->x, finger->y) : -1;
 	if (!press)
 		return;
+	if (control == TOUCH_CONTROL_PANEL_CLOSE)
+	{
+		/* the panel is gone: this finger has nothing left to hold */
+		touch_options_close();
+		finger->control = TOUCH_CONTROL_NONE;
+		return;
+	}
+	if (control == TOUCH_CONTROL_PANEL_SLIDER)
+	{
+		touch_slider_drag(finger->slider, finger->x);
+		platform_haptic(PLATFORM_HAPTIC_PRESS, 12);
+		return;
+	}
 	if (control == TOUCH_CONTROL_STICK)
 	{
 		/* the stick's base is where the finger went down */
@@ -527,6 +887,14 @@ static void touch_take(struct touch_finger *finger, BOOL press)
 	{
 		const struct touch_control *taken = &touch_controls[control];
 
+		if (taken->kind == _touch_kind_options)
+		{
+			/* the panel is over this button now, and the finger that opened
+			it has nothing left to hold */
+			touch_options_open();
+			finger->control = TOUCH_CONTROL_PANEL;
+			return;
+		}
 		if (taken->kind == _touch_kind_toggle)
 			touch_latched ^= 1u << control;
 		touch_pressed |= 1u << control;
@@ -569,8 +937,13 @@ static void touch_update(void)
 	BOOL changed = wanted != touch_layout;
 
 	touch_measure();
+	/* the pause menu the options panel opened behind itself, if it did open */
+	if (touch_options_paused && touch_menus)
+		touch_options_pause_seen = TRUE;
 	touch_layout = wanted;
 	touch_place();
+	if (touch_options)
+		touch_place_panel();
 	if (changed)
 	{
 		int index;
@@ -630,6 +1003,10 @@ static void touch_drag(struct touch_finger *finger, float x, float y)
 		touch_pointer.ny = finger->normalized_y;
 		touch_pointer_moved = TRUE;
 		break;
+	case TOUCH_CONTROL_PANEL_SLIDER:
+		/* the knob follows the finger, wherever along the track it is now */
+		touch_slider_drag(finger->slider, x);
+		break;
 	default:
 		/* the stick is the one thing that must not turn the view, but a
 		button the thumb is holding may: the same thumb holds fire and aims,
@@ -644,9 +1021,11 @@ static void touch_drag(struct touch_finger *finger, float x, float y)
 }
 
 /* a finger lifted: a tap, a long press (the mouse's right button, which the
-menus take as B), or nothing at all */
+menus take as B), a setting moved, or nothing at all */
 static void touch_lift(struct touch_finger *finger)
 {
+	if (finger->control == TOUCH_CONTROL_PANEL_SLIDER)
+		touch_slider_commit(finger->slider);
 	if (finger->control == TOUCH_CONTROL_POINT && !finger->moved)
 	{
 		BOOL held = SDL_GetTicks() - finger->start_ms >= TOUCH_LONG_PRESS_MS;
@@ -799,6 +1178,13 @@ void platform_touch_gamepad(XINPUT_GAMEPAD *pad)
 			pad->wButtons |= control->mask;
 	}
 	touch_pressed = 0;
+	/* the options panel's own buttons, which no control of a layout pressed:
+	the pause menu it opened behind itself, or the one it leaves */
+	if (touch_panel_buttons)
+	{
+		pad->wButtons |= touch_panel_buttons;
+		touch_panel_buttons = 0;
+	}
 	/* the floating stick: the offset of the finger that took it from where it
 	went down, at full deflection at TOUCH_STICK_RADIUS (the game has its own
 	dead zone and curve) */
@@ -819,26 +1205,6 @@ void platform_touch_gamepad(XINPUT_GAMEPAD *pad)
 			}
 			pad->sThumbLX = (SHORT)(x * 32767.0f);
 			pad->sThumbLY = (SHORT)(-y * 32767.0f);
-		}
-	}
-	/* holding the grenade button changes the grenade, which the Xbox
-	controller's black button does and which has no button of its own here */
-	for (index = 0; index < touch_control_count; index++)
-	{
-		int finger = -1;
-
-		if (touch_controls[index].analog != XINPUT_GAMEPAD_LEFT_TRIGGER ||
-			touch_layout != _touch_layout_game)
-			continue;
-		if (!touch_control_held(index, &finger))
-		{
-			touch_grenade_switched = FALSE;
-		}
-		else if (!touch_grenade_switched &&
-			SDL_GetTicks() - touch_fingers[finger].start_ms >= TOUCH_GRENADE_HOLD_MS)
-		{
-			touch_grenade_switched = TRUE;
-			pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] = 0xff;
 		}
 	}
 }
@@ -1005,6 +1371,13 @@ static const float touch_control_held_color[4] = { 1.0f, 1.0f, 1.0f, 0.45f };
 static const float touch_label_color[4] = { 1.0f, 1.0f, 1.0f, 0.62f };
 static const float touch_label_held_color[4] = { 1.0f, 1.0f, 1.0f, 0.95f };
 
+/* the colours the options panel is drawn in */
+static const float touch_backdrop_color[4] = { 0.0f, 0.0f, 0.0f, 0.55f };
+static const float touch_panel_color[4] = { 0.09f, 0.11f, 0.14f, 0.94f };
+static const float touch_track_color[4] = { 1.0f, 1.0f, 1.0f, 0.20f };
+static const float touch_track_fill_color[4] = { 1.0f, 1.0f, 1.0f, 0.50f };
+static const float touch_knob_color[4] = { 1.0f, 1.0f, 1.0f, 0.90f };
+
 /* one rounded box (a circle when the corner's radius is half the size), with
 a hole in the middle, and (cell > 0) a glyph of the labels' font. The centre
 is in the window's pixels with y up. */
@@ -1017,18 +1390,30 @@ static void touch_draw(float x, float y, float half_x, float half_y, float radiu
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
-static void touch_draw_label(const char *label, float x, float y, float radius, const float *color)
+/* a place in the picture, in the window's pixels with y up, which is what the
+program is given (the picture's y is down and OpenGL's is up) */
+static void touch_window(const struct platform_touch_rect *rect, float picture_x,
+	float picture_y, float *x, float *y)
 {
+	*x = (float)rect->left + picture_x;
+	*y = (float)(rect->top + rect->height) - picture_y;
+}
+
+/* how wide a label is at a cell of `cell` (a glyph's five columns and the
+space after it, without the last space) */
+static float touch_text_width(const char *label, float cell)
+{
+	return (float)((int)strlen(label) * (GLYPH_COLUMNS + 1) - 1) * cell;
+}
+
+/* a label's glyphs, seven rows of `cell` tall, the whole label's middle at
+(x, y) */
+static void touch_draw_glyphs(const char *label, float x, float y, float cell, const float *color)
+{
+	float left = x - touch_text_width(label, cell) * 0.5f;
 	int characters = (int)strlen(label);
-	int columns = characters * (GLYPH_COLUMNS + 1) - 1;
-	float cell = radius * 1.8f / (float)columns;
-	float left;
 	int index;
 
-	/* the label stays inside the button */
-	if (cell * GLYPH_ROWS > radius)
-		cell = radius / GLYPH_ROWS;
-	left = x - cell * (float)columns * 0.5f;
 	for (index = 0; index < characters; index++)
 	{
 		int glyph = glyph_index(label[index]);
@@ -1047,6 +1432,119 @@ static void touch_draw_label(const char *label, float x, float y, float radius, 
 		}
 		left += cell * (GLYPH_COLUMNS + 1);
 	}
+}
+
+/* a label as big as fits inside a circle of the given radius */
+static void touch_draw_label(const char *label, float x, float y, float radius, const float *color)
+{
+	float width = touch_text_width(label, 1.0f);
+	float cell;
+
+	if (width <= 0.0f)
+		return;
+	cell = radius * 1.8f / width;
+	/* the label stays inside the button */
+	if (cell * GLYPH_ROWS > radius)
+		cell = radius / (float)GLYPH_ROWS;
+	touch_draw_glyphs(label, x, y, cell, color);
+}
+
+/* where a label's edge is, for the labels that are not inside a button */
+enum touch_align
+{
+	_touch_align_left,
+	_touch_align_middle,
+	_touch_align_right
+};
+
+/* a label `height` tall, its left edge, its middle or its right edge at x */
+static void touch_draw_text(const char *label, float x, float y, float height,
+	enum touch_align align, const float *color)
+{
+	float cell = height / (float)GLYPH_ROWS;
+	float width = touch_text_width(label, cell);
+
+	if (align == _touch_align_left)
+		x += width * 0.5f;
+	else if (align == _touch_align_right)
+		x -= width * 0.5f;
+	touch_draw_glyphs(label, x, y, cell, color);
+}
+
+/* a box of the options panel, at a place in the picture, in the window's */
+static void touch_draw_panel_box(const struct platform_touch_rect *rect,
+	const struct touch_box *box, float radius, const float *color)
+{
+	float x, y;
+
+	touch_window(rect, box->x, box->y, &x, &y);
+	touch_draw(x, y, box->half_width, box->half_height, radius, 0.0f, 0.0f, color);
+}
+
+/* a label of the options panel, at a place in the picture, in the window's */
+static void touch_draw_panel_text(const struct platform_touch_rect *rect, const char *label,
+	float picture_x, float picture_y, float height, enum touch_align align, const float *color)
+{
+	float x, y;
+
+	touch_window(rect, picture_x, picture_y, &x, &y);
+	touch_draw_text(label, x, y, height, align, color);
+}
+
+/* the options panel: the picture under it dimmed, the panel itself, a track a
+setting each with its label and its value, and the button that closes it */
+static void touch_draw_panel(const struct platform_touch_rect *rect)
+{
+	struct touch_finger *holding = touch_panel_finger(TOUCH_CONTROL_PANEL_SLIDER);
+	int index;
+
+	/* the picture, dimmed so that the panel is what the eye goes to (the bars
+	around it are left as they are) */
+	touch_draw((float)rect->left + (float)rect->width * 0.5f,
+		(float)rect->top + (float)rect->height * 0.5f, (float)rect->width * 0.5f,
+		(float)rect->height * 0.5f, 0.0f, 0.0f, 0.0f, touch_backdrop_color);
+	touch_draw_panel_box(rect, &touch_panel_box, 0.030f * touch_unit, touch_panel_color);
+	touch_draw_panel_text(rect, "OPTIONS", touch_panel_box.x,
+		touch_panel_box.y - touch_panel_box.half_height + TOUCH_PANEL_TITLE * touch_unit,
+		TOUCH_TITLE_HEIGHT * touch_unit, _touch_align_middle, touch_label_held_color);
+	for (index = 0; index < TOUCH_SETTING_COUNT; index++)
+	{
+		const struct touch_setting *setting = &touch_settings[index];
+		const struct touch_box *track = &touch_slider_box[index];
+		struct touch_box box;
+		char value[16];
+		float fraction = touch_slider_fraction(index);
+		float label_y = track->y - TOUCH_LABEL_GAP * touch_unit;
+		float knob = TOUCH_KNOB_RADIUS * touch_unit;
+		float filled = fraction * track->half_width;
+
+		/* the setting's name above the left of its track, and what it is set
+		to above the right */
+		snprintf(value, sizeof(value), "%.2f", setting->value);
+		touch_draw_panel_text(rect, setting->label, track->x - track->half_width * 0.5f,
+			label_y, TOUCH_TEXT_HEIGHT * touch_unit, _touch_align_right, touch_label_color);
+		touch_draw_panel_text(rect, value, track->x + track->half_width * 0.5f, label_y,
+			TOUCH_TEXT_HEIGHT * touch_unit, _touch_align_left, touch_label_held_color);
+		/* the track, the part of it the value is, and the knob on the value */
+		touch_draw_panel_box(rect, track, track->half_height, touch_track_color);
+		if (filled > 0.0f)
+		{
+			box = *track;
+			box.x = track->x - track->half_width + filled;
+			box.half_width = filled;
+			touch_draw_panel_box(rect, &box, track->half_height, touch_track_fill_color);
+		}
+		box.x = track->x - track->half_width + fraction * track->half_width * 2.0f;
+		box.y = track->y;
+		box.half_width = box.half_height = knob;
+		touch_draw_panel_box(rect, &box, knob,
+			holding && holding->slider == index ? touch_label_held_color : touch_knob_color);
+	}
+	touch_draw_panel_box(rect, &touch_close_box, touch_close_box.half_width,
+		touch_panel_finger(TOUCH_CONTROL_PANEL_CLOSE) ? touch_label_held_color :
+			touch_control_held_color);
+	touch_draw_panel_text(rect, "X", touch_close_box.x, touch_close_box.y,
+		touch_close_box.half_width * 1.4f, _touch_align_middle, touch_panel_color);
 }
 
 void platform_touch_draw(const struct platform_touch_rect *rect)
@@ -1091,10 +1589,9 @@ void platform_touch_draw(const struct platform_touch_rect *rect)
 		const struct touch_control *control = &touch_controls[index];
 		int finger = -1;
 		BOOL held;
-		/* the picture's y is down and OpenGL's is up */
-		float x = (float)rect->left + control->x;
-		float y = (float)(rect->top + rect->height) - control->y;
+		float x, y;
 
+		touch_window(rect, control->x, control->y, &x, &y);
 		held = touch_control_held(index, &finger);
 		touch_draw(x, y, control->radius, control->radius, control->radius, 0.0f, 0.0f,
 			held ? touch_control_held_color : touch_control_color);
@@ -1110,14 +1607,14 @@ void platform_touch_draw(const struct platform_touch_rect *rect)
 	if (stick_finger >= 0)
 	{
 		float radius = TOUCH_STICK_RADIUS * touch_unit;
-		float x = (float)rect->left + touch_stick_x;
-		float y = (float)(rect->top + rect->height) - touch_stick_y;
 		float knob = radius * 0.38f;
+		float x, y;
 		float dx = touch_fingers[stick_finger].x - touch_stick_x;
 		float dy = touch_fingers[stick_finger].y - touch_stick_y;
 		float length = sqrtf(dx * dx + dy * dy);
 		float ring[4];
 
+		touch_window(rect, touch_stick_x, touch_stick_y, &x, &y);
 		if (length > radius)
 		{
 			dx *= radius / length;
@@ -1128,6 +1625,9 @@ void platform_touch_draw(const struct platform_touch_rect *rect)
 		touch_draw(x, y, radius, radius, radius, radius * 0.55f, 0.0f, ring);
 		touch_draw(x + dx, y - dy, knob, knob, knob, 0.0f, 0.0f, touch_control_held_color);
 	}
+	/* the options panel, over all of it */
+	if (touch_options)
+		touch_draw_panel(rect);
 }
 
 #endif /* HALO_ANDROID */

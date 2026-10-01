@@ -6,8 +6,9 @@ The native ports' settings (port_config.h), parsed with tomlc17
 type, default, the HALO_* environment variable that overrides it and the
 comment written into a new file. The file is read once, on the first
 question; unknown keys and values of the wrong type are reported in the log
-and the defaults used instead, and the file itself is never rewritten once
-it exists, so that the player's edits and comments stay.
+and the defaults used instead, and nothing but the line of a setting the game
+writes (config_write_boolean, config_write_real) is ever changed once it
+exists, so that the player's edits and comments stay.
 */
 
 #include "platform.h"
@@ -796,28 +797,23 @@ static int config_line_section(const char *line, const char *end, char *section,
 	return 1;
 }
 
-/* sets a boolean setting, for now and in config.toml: its line there is
-changed (or added), the rest of the file kept as it is */
-int config_write_boolean(const char *name, int value)
+/* sets a setting, in the file and for now: its line there is changed (or
+added), the rest of the file kept as it is, and line_text is the line as it
+is to be written (the key, an =, and the value as the file spells it) */
+static int config_write_line(const char *name, const char *line_text)
 {
 	const char *dot = strchr(name, '.');
-	long index = config_setting_index(name);
-	char section[64], key[64], wanted[80], current[64] = "", line_text[96], path[1024];
+	char section[64], key[64], wanted[80], current[64] = "", path[1024];
 	struct config_text out = { 0 };
 	size_t size = 0;
 	char *text;
 	const char *line;
 	int written = 0, in_section = 0, succeeded;
 
-	if (index < 0 || config_settings[index].type != _config_boolean || !dot || (size_t)(dot - name) >= sizeof(section))
+	if (!dot || (size_t)(dot - name) >= sizeof(section))
 		return 0;
-	/* (the file read first, as the other settings are) */
-	config_boolean(name);
-	pthread_mutex_lock(&config_lock);
-	config_values[index].boolean = value != 0;
 	snprintf(section, sizeof(section), "%.*s", (int)(dot - name), name);
 	snprintf(key, sizeof(key), "%s", dot + 1);
-	snprintf(line_text, sizeof(line_text), "%s = %s\n", key, value ? "true" : "false");
 	snprintf(wanted, sizeof(wanted), "%s", section);
 	config_path(path, sizeof(path));
 	text = config_read_file(path, &size);
@@ -868,9 +864,49 @@ int config_write_boolean(const char *name, int value)
 		config_append(&out, line_text);
 	}
 	succeeded = out.buffer && config_write_file(path, out.buffer);
-	pthread_mutex_unlock(&config_lock);
 	free(out.buffer);
 	free(text);
+	return succeeded;
+}
+
+/* sets a boolean setting, for now and in config.toml */
+int config_write_boolean(const char *name, int value)
+{
+	long index = config_setting_index(name);
+	char line_text[96];
+	int succeeded;
+
+	if (index < 0 || config_settings[index].type != _config_boolean)
+		return 0;
+	/* (the file read first, as the other settings are) */
+	config_boolean(name);
+	snprintf(line_text, sizeof(line_text), "%s = %s\n", strchr(name, '.') + 1,
+		value ? "true" : "false");
+	pthread_mutex_lock(&config_lock);
+	config_values[index].boolean = value != 0;
+	succeeded = config_write_line(name, line_text);
+	pthread_mutex_unlock(&config_lock);
+	return succeeded;
+}
+
+/* sets a real setting, for now and in config.toml */
+int config_write_real(const char *name, double value)
+{
+	long index = config_setting_index(name);
+	char line_text[96];
+	int succeeded;
+
+	if (index < 0 || config_settings[index].type != _config_real)
+		return 0;
+	if (!(value >= -1.0e6 && value <= 1.0e6))	/* not a number, or absurd */
+		return 0;
+	/* (the file read first, as the other settings are) */
+	config_real(name);
+	snprintf(line_text, sizeof(line_text), "%s = %g\n", strchr(name, '.') + 1, value);
+	pthread_mutex_lock(&config_lock);
+	config_values[index].real = value;
+	succeeded = config_write_line(name, line_text);
+	pthread_mutex_unlock(&config_lock);
 	return succeeded;
 }
 
