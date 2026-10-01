@@ -1311,6 +1311,12 @@ static unsigned long __stdcall filesystem_initialization_thread_proc(
 	void *input);
 static void perform_filesystem_initialization(
 	void);
+static void ui_mouse_note_list_arrow(
+	struct widget_instance *widget,
+	struct tag_reference arrow_bitmap,
+	rectangle2d arrow_bounds,
+	point2d offset,
+	boolean forward);
 static void ui_widget_delete_children_recursive(
 	struct widget_instance *widget);
 static struct widget_instance *ui_widget_launch_widget(
@@ -5042,6 +5048,8 @@ static void widget_instance_render_spinner_list(
 			(alpha << 24) | 0x00FFFFFF,
 			&parameters,
 			FALSE);
+		ui_mouse_note_list_arrow(widget, definition->list_header_bitmap,
+			definition->list_header_bounds, offset, FALSE);
 	}
 	bitmap = bitmap_group_get_bitmap_from_sequence(
 		definition->list_footer_bitmap.index,
@@ -5066,6 +5074,8 @@ static void widget_instance_render_spinner_list(
 			(alpha << 24) | 0x00FFFFFF,
 			&parameters,
 			FALSE);
+		ui_mouse_note_list_arrow(widget, definition->list_footer_bitmap,
+			definition->list_footer_bounds, offset, TRUE);
 	}
 	if (definition->child_widgets.count == 0)
 	{
@@ -5218,6 +5228,9 @@ enum ui_mouse_target_kind
 	/* one of the items a list shows side by side (profiles, levels): the
 	list steps to it, and a click then presses A */
 	_ui_mouse_target_list_slot,
+	/* one of the arrows a list draws beside its items, which the d-pad
+	moves the list through: a click presses the arrow's d-pad button */
+	_ui_mouse_target_list_arrow,
 	/* a button's icon and label in a screen's key: a click presses it */
 	_ui_mouse_target_button
 };
@@ -5518,6 +5531,51 @@ static void ui_mouse_list_directions(
 	return;
 }
 
+/* one of the arrows a list draws beside its items, as a target to click:
+the header is the way back and the footer the way on, the pair the d-pad
+moves the list through. Only drawn arrows are picked, so a list without
+them (or one that does not scroll) has nothing to click here. */
+static void ui_mouse_note_list_arrow(
+	struct widget_instance *widget,
+	struct tag_reference arrow_bitmap,
+	rectangle2d arrow_bounds,
+	point2d offset,
+	boolean forward)
+{
+	struct ui_mouse_target *target;
+	short back, step_forward;
+	rectangle2d bounds;
+
+	if (!ui_mouse_noting_targets ||
+		ui_mouse_target_count >= UI_MOUSE_MAXIMUM_TARGETS ||
+		widget->disabled ||
+		!widget_instance_can_receive_events(widget) ||
+		!bitmap_group_get_bitmap_from_sequence(arrow_bitmap.index, 0, 0))
+	{
+		return;
+	}
+	if (TEST_FLAG(ui_widget_definition_get(widget->definition_tag_index)->list_flags,
+			_list_single_preview_box_no_scroll))
+	{
+		return;
+	}
+	bounds = arrow_bounds;
+	bounds.x0 += offset.x;
+	bounds.y0 += offset.y;
+	bounds.x1 += offset.x;
+	bounds.y1 += offset.y;
+	if (bounds.x1 <= bounds.x0 || bounds.y1 <= bounds.y0)
+		return;
+	ui_mouse_list_directions(widget, &back, &step_forward);
+	target = &ui_mouse_targets[ui_mouse_target_count++];
+	target->widget = widget;
+	target->bounds = bounds;
+	target->kind = _ui_mouse_target_list_arrow;
+	target->button_index = forward ? step_forward : back;
+
+	return;
+}
+
 /* steps a list that shows several items to the one shown in a slot, as
 pressing the d-pad that many times would */
 static void ui_mouse_step_list_to_slot(
@@ -5680,6 +5738,16 @@ static void ui_widgets_process_mouse(
 					ui_mouse_step_list_to_slot(target->widget);
 					ui_mouse_press(_gamepad_analog_button_a);
 					break;
+				case _ui_mouse_target_list_arrow:
+				{
+					short button_index = target->button_index;
+
+					/* the arrow is the list's own, so the list takes the
+					focus before its d-pad button is pressed on it */
+					ui_mouse_give_focus(target->widget);
+					ui_mouse_press(button_index);
+					break;
+				}
 				case _ui_mouse_target_button:
 					ui_mouse_press(target->button_index);
 					break;
