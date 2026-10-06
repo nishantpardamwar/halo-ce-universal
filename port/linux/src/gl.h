@@ -86,6 +86,10 @@ this list to generate the guest's entry points */
 	X(glCheckFramebufferStatus) \
 	X(glBlitFramebuffer) \
 	X(glDrawBuffers) \
+	X(glGenRenderbuffers) \
+	X(glBindRenderbuffer) \
+	X(glRenderbufferStorageMultisample) \
+	X(glFramebufferRenderbuffer) \
 	X(glReadBuffer) \
 	X(glInvalidateFramebuffer) \
 	X(glGenBuffers) \
@@ -196,6 +200,10 @@ this list to generate the guest's entry points */
 	X(glCheckFramebufferStatus) \
 	X(glBlitFramebuffer) \
 	X(glDrawBuffers) \
+	X(glGenRenderbuffers) \
+	X(glBindRenderbuffer) \
+	X(glRenderbufferStorageMultisample) \
+	X(glFramebufferRenderbuffer) \
 	X(glGenBuffers) \
 	X(glDeleteBuffers) \
 	X(glBindBuffer) \
@@ -210,6 +218,11 @@ this list to generate the guest's entry points */
 	X(glDisableVertexAttribArray) \
 	X(glVertexAttribPointer) \
 	X(glVertexAttribIPointer) \
+	X(glVertexAttribFormat) \
+	X(glVertexAttribIFormat) \
+	X(glVertexAttribBinding) \
+	X(glBindVertexBuffer) \
+	X(glGetQueryBufferObjectuiv) \
 	X(glVertexAttrib4fv) \
 	X(glVertexAttribI4ui) \
 	X(glDrawArrays) \
@@ -243,6 +256,7 @@ this list to generate the guest's entry points */
 	X(glBeginQuery) \
 	X(glEndQuery) \
 	X(glGetQueryObjectuiv) \
+	X(glMemoryBarrier) \
 	X(glDebugMessageCallback)
 #endif
 
@@ -310,6 +324,10 @@ pointers, sees the declarations without these aliases */
 #define glCheckFramebufferStatus halo_glCheckFramebufferStatus
 #define glBlitFramebuffer halo_glBlitFramebuffer
 #define glDrawBuffers halo_glDrawBuffers
+#define glGenRenderbuffers halo_glGenRenderbuffers
+#define glBindRenderbuffer halo_glBindRenderbuffer
+#define glRenderbufferStorageMultisample halo_glRenderbufferStorageMultisample
+#define glFramebufferRenderbuffer halo_glFramebufferRenderbuffer
 #define glReadBuffer halo_glReadBuffer
 #define glInvalidateFramebuffer halo_glInvalidateFramebuffer
 #define glGenBuffers halo_glGenBuffers
@@ -418,6 +436,10 @@ pointers, sees the declarations without these aliases */
 #define glCheckFramebufferStatus halo_glCheckFramebufferStatus
 #define glBlitFramebuffer halo_glBlitFramebuffer
 #define glDrawBuffers halo_glDrawBuffers
+#define glGenRenderbuffers halo_glGenRenderbuffers
+#define glBindRenderbuffer halo_glBindRenderbuffer
+#define glRenderbufferStorageMultisample halo_glRenderbufferStorageMultisample
+#define glFramebufferRenderbuffer halo_glFramebufferRenderbuffer
 #define glGenBuffers halo_glGenBuffers
 #define glDeleteBuffers halo_glDeleteBuffers
 #define glBindBuffer halo_glBindBuffer
@@ -432,6 +454,11 @@ pointers, sees the declarations without these aliases */
 #define glDisableVertexAttribArray halo_glDisableVertexAttribArray
 #define glVertexAttribPointer halo_glVertexAttribPointer
 #define glVertexAttribIPointer halo_glVertexAttribIPointer
+#define glVertexAttribFormat halo_glVertexAttribFormat
+#define glVertexAttribIFormat halo_glVertexAttribIFormat
+#define glVertexAttribBinding halo_glVertexAttribBinding
+#define glBindVertexBuffer halo_glBindVertexBuffer
+#define glGetQueryBufferObjectuiv halo_glGetQueryBufferObjectuiv
 #define glVertexAttrib4fv halo_glVertexAttrib4fv
 #define glVertexAttribI4ui halo_glVertexAttribI4ui
 #define glDrawArrays halo_glDrawArrays
@@ -465,6 +492,7 @@ pointers, sees the declarations without these aliases */
 #define glBeginQuery halo_glBeginQuery
 #define glEndQuery halo_glEndQuery
 #define glGetQueryObjectuiv halo_glGetQueryObjectuiv
+#define glMemoryBarrier halo_glMemoryBarrier
 #define glDebugMessageCallback halo_glDebugMessageCallback
 
 #endif

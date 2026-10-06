@@ -1381,6 +1381,8 @@ void object_cause_damage(
 	short body_part;
 	short object_number;
 	long damaged_object_indices[16];
+	/* port: the gametype's friendly fire (game_engine_friendly_damage) */
+	short friendly_damage;
 
 	/* the distributed netcode (port/linux/NETCODE.md): the host deals
 	damage; a client reports its own players' hits instead, and the host
@@ -1609,6 +1611,7 @@ void object_cause_damage(
 			body_damage_multiplier = 0.f;
 			being_damaged_flags = 0;
 			body_part = NONE;
+			friendly_damage = _friendly_damage_all;
 
 			if (collision_model_index != NONE)
 			{
@@ -1646,6 +1649,10 @@ void object_cause_damage(
 						being_damaged_flags,
 						_object_being_damaged_by_friendly_bit,
 						TRUE);
+					friendly_damage = game_engine_friendly_damage(damage->owner_player_index, current_object_index,
+						TEST_FLAG(damage->flags, _damage_area_of_effect_bit) ||
+						damage_definition->category == _damage_category_grenade ||
+						damage_definition->category == _damage_category_highexplosive);
 				}
 
 				if (damaged_object_count == 0 &&
@@ -1686,7 +1693,12 @@ void object_cause_damage(
 					force_kill = TRUE;
 				}
 
+				/* port: nor does a teammate's hit kill outright (a melee from
+				behind, an instant kill) where the gametype's friendly fire
+				spares the body; a killing blow the host dealt (a client's
+				replay of it) is dealt as the host dealt it */
 				if (force_kill &&
+					(friendly_damage == _friendly_damage_all || distributed_damage_authorized) &&
 					!TEST_FLAG(current_object->object.damage_flags, _object_dead_bit))
 				{
 					current_object->object.body_vitality = 0.f;
@@ -1701,7 +1713,8 @@ void object_cause_damage(
 						TRUE);
 				}
 
-				if (!TEST_FLAG(damage->flags, _damage_bypasses_shields_bit) &&
+				if (friendly_damage != _friendly_damage_none &&
+					!TEST_FLAG(damage->flags, _damage_bypasses_shields_bit) &&
 					!TEST_FLAG(damage_definition->flags, _damage_skips_shields_bit) &&
 					current_object->object.maximum_shield_vitality > 0.f &&
 					(damaged_object_count == 0 ||
@@ -1720,7 +1733,8 @@ void object_cause_damage(
 						&total_damage);
 				}
 
-				if ((damaged_object_count == 0 ||
+				if (friendly_damage == _friendly_damage_all &&
+					(damaged_object_count == 0 ||
 						(parent_takes_body_damage &&
 							TEST_FLAG(
 								collision_model->resistance.flags,
@@ -2635,6 +2649,20 @@ void damage_replay_kill(
 	short material_index)
 {
 	SET_FLAG(damage->flags, _damage_kill_instantly_bit, TRUE);
+	distributed_damage_authorized = TRUE;
+	object_cause_damage(damage, object_index, node_index, region_index, material_index, NULL);
+	distributed_damage_authorized = FALSE;
+}
+
+/* ... damage to scenery or a device, dealt as the host dealt it: the copy
+breaks, plays its effects and is destroyed as the host's was */
+void damage_replay_static(
+	long object_index,
+	struct damage_data *damage,
+	short node_index,
+	short region_index,
+	short material_index)
+{
 	distributed_damage_authorized = TRUE;
 	object_cause_damage(damage, object_index, node_index, region_index, material_index, NULL);
 	distributed_damage_authorized = FALSE;

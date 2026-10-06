@@ -267,6 +267,7 @@ symbols in this file:
 
 /* port/linux/game/network_distributed.c's */
 void network_distributed_handle_message(long machine_index, word const *message, word size);
+void network_distributed_handle_stream_message(long machine_index, word const *message, word size);
 
 /* ---------- constants */
 
@@ -289,6 +290,11 @@ enum
 	/* port: the least time between two advertisements of the game
 	(milliseconds: network_game_server_handle_message_client_broadcast_game_search) */
 	GAME_ADVERTISEMENT_INTERVAL = 250,
+	/* port: the least time between two answers to one address's pings, and
+	the addresses kept to tell, no more of them answered in that time
+	(network_game_server_handle_message_client_ping) */
+	PING_REPLY_INTERVAL = 250,
+	MAXIMUM_PING_REPLY_ADDRESSES = 32,
 };
 
 enum
@@ -447,6 +453,11 @@ struct message_client_switch_to_pregame
 	long unused;
 };
 
+struct message_client_graceful_game_exit_postgame
+{
+	long unused;
+};
+
 struct message_server_machine_accepted
 {
 	long random_seed;
@@ -551,6 +562,11 @@ static boolean network_game_server_handle_message_client_switch_to_pregame(
 	struct network_game_server_client_machine *client_machine,
 	word *message,
 	short message_size);
+static boolean network_game_server_handle_message_client_graceful_game_exit_postgame(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	word *message,
+	short message_size);
 
 /* ---------- globals */
 
@@ -558,44 +574,95 @@ static boolean network_game_server_handle_message_client_switch_to_pregame(
 
 /* port: a name a machine sends (its machine's, or a player's: they come
 from the wire, from anyone joining by any link) kept to what draws as one
-line of text: ended within its field, without control characters (line
-breaks, tabs), Unicode's separators of lines and paragraphs, zero-width
-and right-to-left marks, lone surrogates and non-characters, nor "|" (the
-game's text's own marks), its spaces before and after left out; one with
-nothing left the default given */
+line of text (player_name_clean); one with nothing left that the host's
+ban command can type the default given */
 static void network_game_server_clean_name(
 	wchar_t *name,
 	long count,
 	wchar_t const *default_name)
 {
-	long read;
-	long written = 0;
-
-	name[count - 1] = 0;
-	for (read = 0; read < count && name[read]; read++)
-	{
-		unsigned short character = (unsigned short)name[read];
-
-		if (character < 0x20 || (character >= 0x7F && character <= 0x9F) ||
-			(character >= 0x200B && character <= 0x200F) || (character >= 0x2028 && character <= 0x202E) ||
-			(character >= 0x2060 && character <= 0x206F) || character == 0xFEFF ||
-			(character >= 0xD800 && character <= 0xDFFF) || character >= 0xFFF0 || character == '|' ||
-			(character == ' ' && written == 0))
-		{
-			continue;
-		}
-		name[written++] = name[read];
-	}
-	while (written > 0 && name[written - 1] == ' ')
-		written--;
-	name[written] = 0;
-	if (!written)
+	if (!player_name_clean(name, count))
 	{
 		long index;
 
 		for (index = 0; index < count - 1 && default_name[index]; index++)
 			name[index] = default_name[index];
 		name[index] = 0;
+	}
+}
+
+/* port: a name as the host's ban command reads it: in ASCII
+(player_name_character_ascii), in lower case */
+static char network_game_server_name_character(
+	wchar_t character)
+{
+	char ascii = player_name_character_ascii(character);
+
+	return ascii >= 'A' && ascii <= 'Z' ? (char)(ascii - 'A' + 'a') : ascii;
+}
+
+/* port: whether another player of the game than the one at own_index has a
+name the ban command would read as the same */
+static boolean network_game_server_player_name_taken(
+	struct network_game_server *server,
+	wchar_t const *name,
+	long own_index)
+{
+	struct network_game *game = network_game_server_get_game(server);
+	long index;
+
+	for (index = 0; index < (long)NUMBEROF(game->players); index++)
+	{
+		wchar_t const *other = game->players[index].name;
+		long character;
+
+		if (index == own_index || !network_player_is_valid(&game->players[index]))
+			continue;
+		for (character = 0; character < (long)NUMBEROF(game->players[index].name); character++)
+		{
+			if (!name[character] || !other[character])
+			{
+				if (!name[character] && !other[character])
+					return TRUE;
+				break;
+			}
+			if (network_game_server_name_character(name[character]) != network_game_server_name_character(other[character]))
+				break;
+		}
+	}
+
+	return FALSE;
+}
+
+/* port: a player's name from the wire made one the host's ban command can
+always single out: kept to text that draws, with something it can type
+(else "Player"), and, the same as another player's, numbered ("Player 2") */
+static void network_game_server_clean_player_name(
+	struct network_game_server *server,
+	struct network_player *player,
+	long own_index)
+{
+	wchar_t base[NUMBEROF(player->name)];
+	long number;
+
+	network_game_server_clean_name(player->name, NUMBEROF(player->name), L"Player");
+	csmemcpy(base, player->name, sizeof(base));
+	for (number = 2; number < 100 && network_game_server_player_name_taken(server, player->name, own_index); number++)
+	{
+		wchar_t suffix[4];
+		long suffix_length = number < 10 ? 2 : 3;
+		long length = ustrlen(base);
+
+		suffix[0] = L' ';
+		suffix[1] = number < 10 ? (wchar_t)(L'0' + number) : (wchar_t)(L'0' + number / 10);
+		suffix[2] = (wchar_t)(L'0' + number % 10);
+		suffix[suffix_length] = 0;
+		if (length > (long)NUMBEROF(player->name) - 1 - suffix_length)
+			length = (long)NUMBEROF(player->name) - 1 - suffix_length;
+		csmemcpy(player->name, base, length * sizeof(wchar_t));
+		while (length > 0 && player->name[length - 1] == L' ')
+			length--;
+		csmemcpy(player->name + length, suffix, (suffix_length + 1) * sizeof(wchar_t));
 	}
 }
 
@@ -742,7 +809,12 @@ short network_distributed_server_machines(
 		connection = network_game_server_get_client_connection(machine);
 		if (!connection || !network_connection_active(connection))
 			continue;
-		network_game_server_get_client_machine(server, machine, &game_machine_index);
+		/* (port: and not a machine without a slot) */
+		if (!network_game_server_get_client_machine(server, machine, &game_machine_index) ||
+			game_machine_index == NONE)
+		{
+			continue;
+		}
 		machine_indices[count++] = game_machine_index;
 	}
 	return count;
@@ -1241,15 +1313,19 @@ boolean network_game_server_handle_client_message(
 							}
 							break;
 
+						/* (port: its own handler, which decodes it as the
+						postgame message it is: the pregame's, which this
+						called, took none out of the pregame, nor could decode
+						one) */
 						case _message_client_graceful_game_exit_postgame:
-							result = network_game_server_handle_message_client_graceful_game_exit_pregame(
+							result = network_game_server_handle_message_client_graceful_game_exit_postgame(
 								server,
 								machine,
 								message,
 								message_buffer_size);
 							if (!result)
 							{
-								network_event("network_game_server_handle_message_client_graceful_game_exit_pregame() failed");
+								network_event("network_game_server_handle_message_client_graceful_game_exit_postgame() failed");
 							}
 							break;
 
@@ -1277,7 +1353,8 @@ boolean network_game_server_handle_client_message(
 					long machine_index;
 
 					network_game_server_get_client_machine(server, machine, &machine_index);
-					network_distributed_handle_message(machine_index, message, message_buffer_size);
+					/* (port: from its stream, which only it can send on) */
+					network_distributed_handle_stream_message(machine_index, message, message_buffer_size);
 				}
 				break;
 
@@ -1539,7 +1616,7 @@ static void network_game_server_queue_client_player(
 		network_event("client machine #%ld tried to add a player of another machine", machine_index);
 		return;
 	}
-	network_game_server_clean_name(player->name, NUMBEROF(player->name), L"Player");
+	network_game_server_clean_player_name(server, player, NONE);
 	network_game_server_queue_player_for_addition(server, player);
 }
 
@@ -1619,6 +1696,11 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] = (byte)(HALO_PORT_NETWORK_VERSION >> 8);
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] =
 				HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG;
+			if (network_game_server_get_state(server, NULL) != _network_game_server_state_pregame ||
+				network_game_server_game_is_loading(server))
+			{
+				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_IN_PROGRESS_FLAG;
+			}
 			/* (open to joins: not while the machines load the game, nor
 			once it is over, nor in progress when no player can join it) */
 			if (network_game_server_get_state(server, NULL) == _network_game_server_state_ingame
@@ -1670,11 +1752,43 @@ static boolean network_game_server_handle_message_client_ping(
 	struct message_server_pong pong;
 	struct network_message *reply;
 	boolean result = FALSE;
+	/* port: an address answered no more often than PING_REPLY_INTERVAL, and
+	no more than MAXIMUM_PING_REPLY_ADDRESSES in that time (the answer goes
+	to the port the ping names, at the address it came from, which anyone
+	can send one as: a flood of pings would be a flood of answers, at
+	another's machine). A searching client pings once a second */
+	static struct
+	{
+		unsigned long address;
+		unsigned long time;
+	} replied[MAXIMUM_PING_REPLY_ADDRESSES];
+	unsigned long now = system_milliseconds();
+	short index;
+	short slot = NONE;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\networking\\network_server_message_handler.c",
 		0x26A,
 		server && source_address && client_message);
+
+	for (index = 0; index < MAXIMUM_PING_REPLY_ADDRESSES; index++)
+	{
+		boolean recent = replied[index].address && now - replied[index].time < PING_REPLY_INTERVAL;
+
+		if (replied[index].address == source_address->address.long_words[0])
+		{
+			if (recent)
+				return TRUE;
+			slot = index;
+			break;
+		}
+		if (!recent && slot == NONE)
+			slot = index;
+	}
+	if (slot == NONE)
+		return TRUE;
+	replied[slot].address = source_address->address.long_words[0];
+	replied[slot].time = now;
 
 	pong.timestamp = client_message->timestamp;
 	reply = create_network_game_message(
@@ -1802,7 +1916,7 @@ static boolean network_game_server_handle_message_client_join_game_request(
 						/* port: a machine joining the game in progress is named
 						by its join (its settings request, which names a machine
 						in the lobby, is refused in game) */
-						if (late_join)
+						if (late_join && client_machine)
 							csmemcpy(client_machine->name, machine_name, sizeof(client_machine->name));
 
 						acceptance.machine_index = (short)machine_index;
@@ -2029,8 +2143,8 @@ static boolean network_game_server_handle_message_client_add_player_request_preg
 			_network_game_packet_class_client_pregame))
 		{
 			/* (port: its name kept to text that draws, as every name from
-			the wire) */
-			network_game_server_clean_name(player.name, NUMBEROF(player.name), L"Player");
+			the wire, and told apart from the other players') */
+			network_game_server_clean_player_name(server, &player, NONE);
 			if (network_game_server_add_player_to_game(server, client_machine, &player))
 			{
 				if (!network_game_server_send_game_data_pregame(server))
@@ -2228,7 +2342,8 @@ static boolean network_game_server_handle_message_client_player_settings_request
 			slot out of the list over the machines), with a name that ends,
 			and on a team of the game's: else the one the host has it on */
 			network_game_server_get_client_machine(server, client_machine, &machine_index);
-			network_game_server_clean_name(player.name, NUMBEROF(player.name), L"Player");
+			network_game_server_clean_player_name(server, &player,
+				VALID_INDEX(player.player_list_index, MAXIMUM_NUMBER_OF_PLAYERS) ? player.player_list_index : NONE);
 			if (VALID_INDEX(player.player_list_index, MAXIMUM_NUMBER_OF_PLAYERS) &&
 				(!game->variant.universal_variant.teams ||
 					!VALID_INDEX(player.team_index, NUMBER_OF_MULTIPLAYER_TEAMS)))
@@ -2347,9 +2462,10 @@ static boolean network_game_server_handle_message_client_graceful_game_exit_preg
 			&packet_version,
 			_network_game_packet_class_client_pregame))
 		{
-			if (network_game_server_remove_machine_from_game(
-				server,
-				network_game_server_get_client_machine(server, client_machine, NULL)))
+			struct network_machine *machine = network_game_server_get_client_machine(server, client_machine, NULL);
+
+			/* (port: none for a machine without a slot) */
+			if (machine && network_game_server_remove_machine_from_game(server, machine))
 			{
 				/* (not to machines loading the game) */
 				if (network_game_server_lobby_is_open(server) &&
@@ -2647,4 +2763,49 @@ static boolean network_game_server_handle_message_client_switch_to_pregame(
 	}
 
 	return result;
+}
+
+/* port: a machine leaving the game's scores, as one leaving the lobby does
+(network_game_server_handle_message_client_graceful_game_exit_pregame) */
+static boolean network_game_server_handle_message_client_graceful_game_exit_postgame(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	word *message,
+	short message_size)
+{
+	if (network_game_server_get_state(server, NULL) == _network_game_server_state_postgame)
+	{
+		struct message_client_graceful_game_exit_postgame graceful_game_exit;
+		short packet_type = _message_client_graceful_game_exit_postgame;
+		short packet_version = NETWORK_GAME_MESSAGE_VERSION;
+
+		message_size -= sizeof(word);
+		if (decode_network_game_message(
+			&graceful_game_exit,
+			message + 1,
+			&message_size,
+			&packet_type,
+			&packet_version,
+			_network_game_packet_class_client_postgame))
+		{
+			struct network_machine *machine = network_game_server_get_client_machine(server, client_machine, NULL);
+
+			if (!machine || !network_game_server_remove_machine_from_game(server, machine))
+			{
+				network_event(
+					"network_game_server_remove_machine_from_game() failed in network_game_server_handle_message_client_graceful_game_exit_postgame()");
+			}
+		}
+		else
+		{
+			network_event("server failed to decode a message_client_graceful_game_exit_postgame packet");
+		}
+	}
+	else
+	{
+		network_event(
+			"failed to handle a message_client_graceful_game_exit_postgame message because the server is not in post-game");
+	}
+
+	return TRUE;
 }
